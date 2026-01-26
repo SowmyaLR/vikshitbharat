@@ -1,8 +1,8 @@
-# Design Document: AI Mandi Mediator
+# Design Document: DharmaVyāpaara
 
 ## Overview
 
-The AI Mandi Mediator is a voice-first, multilingual digital marketplace that enables buyers to browse and select vendors based on comprehensive trust scores, then negotiate multiple items in AI-mediated sessions. The system combines advanced vendor trust scoring, real-time voice translation, AI-powered trust building, and future-oriented relationship advice to create lasting business partnerships between vendors and buyers in Indian agricultural markets.
+The DharmaVyāpaara is a voice-first, multilingual digital marketplace that enables buyers to browse and select vendors based on comprehensive trust scores, then negotiate multiple items in AI-mediated sessions. The system combines advanced vendor trust scoring, real-time voice translation, AI-powered trust building, and future-oriented relationship advice to create lasting business partnerships between vendors and buyers in Indian agricultural markets.
 
 The architecture follows a microservices pattern with real-time communication capabilities, delivered as a Progressive Web App (PWA) supporting voice-first interactions for all users while providing a vendor marketplace for informed decision-making. The web platform ensures universal accessibility across devices without requiring app store installations, with a focus on rapid 2-hour implementation of core features.
 

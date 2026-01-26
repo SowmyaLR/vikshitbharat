@@ -2,7 +2,7 @@
 
 ## Introduction
 
-The AI Mandi Mediator is a voice-first, multilingual digital mediator for Indian agricultural markets that enables buyers to negotiate multiple items in a single session while building trust through AI intervention. The system focuses on real-time voice translation, trust-building communication, and future-oriented relationship advice to create lasting business partnerships between vendors and buyers. 
+The DharmaVyāpaara is a voice-first, multilingual digital mediator for Indian agricultural markets that enables buyers to negotiate multiple items in a single session while building trust through AI intervention. The system focuses on real-time voice translation, trust-building communication, and future-oriented relationship advice to create lasting business partnerships between vendors and buyers. 
 
 ## Glossary
 

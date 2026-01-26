@@ -1,4 +1,4 @@
-# AI Mandi Mediator
+# DharmaVyāpaara
 
 A voice-first, multilingual digital marketplace for Indian agricultural markets that enables buyers to browse and select vendors based on comprehensive trust scores, then negotiate multiple items in AI-mediated sessions. The system focuses on real-time voice translation, trust-building communication, and future-oriented relationship advice to create lasting business partnerships between vendors and buyers.
 
