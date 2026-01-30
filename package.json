@@ -1,0 +1,37 @@
+{
+  "name": "ai-mandi-mediator",
+  "version": "1.0.0",
+  "description": "AI-powered negotiation platform for Indian agricultural markets",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm start",
+    "build": "cd client && npm run build"
+  },
+  "keywords": [
+    "agriculture",
+    "negotiation",
+    "ai",
+    "mandi"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.1.0",
+    "@types/socket.io": "^3.0.1",
+    "@types/uuid": "^10.0.0",
+    "concurrently": "^7.6.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3",
+    "uuid": "^13.0.0"
+  }
+}

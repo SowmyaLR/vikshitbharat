@@ -105,6 +105,42 @@ A voice-first, multilingual digital marketplace for Indian agricultural markets 
 - **AWS S3** for voice message storage
 - **Nginx** (production reverse proxy)
 
+## Future Architecture (Proposed)
+
+To scale DharmaVyāpaara for production, we propose a **Hybrid Architecture (Polyglot Persistence)** that leverages the strengths of both Relational and NoSQL databases.
+
+### 1. PostgreSQL (Structured Data & Source of Truth)
+Used for data requiring strict consistency, complex relationships, and ACID transactions.
+- **User Profiles**: Buyers, Sellers, and Role management.
+- **Inventory Management**: Commodites, Stock levels, and Pricing.
+- **Location Hierarchies**: States, Districts, and Mandis with strict relational linkage.
+- **Order Processing**: Finalized deals and transactional records.
+
+### 2. MongoDB (High-Velocity & Unstructured Data)
+Used for data with flexible schemas and high write throughput.
+- **Real-time Chat Logs**: Storing millions of negotiation messages efficiently.
+- **AI Metadata**: Sentiment scores, negotiation intent analysis, and dynamic AI context.
+- **Audit Trails**: System-wide event logging (e.g., "User logged in", "Price changed").
+
+### Architecture Diagram
+```mermaid
+graph TD
+    Client[Client Applications] --> API[API Gateway / Load Balancer]
+    API --> Auth[Auth Service]
+    API --> Market[Marketplace Service]
+    API --> Neg[Negotiation Service]
+
+    subgraph "Data Layer"
+        Postgres[(PostgreSQL\nStructured Data)]
+        Mongo[(MongoDB\nChat & AI Logs)]
+    end
+
+    Auth --> Postgres
+    Market --> Postgres
+    Neg --> Mongo
+    Neg -.->|Ref Global IDs| Postgres
+```
+
 ## Quick Start
 
 ### Prerequisites
