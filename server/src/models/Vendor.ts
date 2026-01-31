@@ -16,8 +16,9 @@ const VendorSchema = new mongoose.Schema({
     trustScore: {
         overall: { type: Number, default: 0 },
         priceHonesty: { type: Number, default: 0 },
-        fulfillment: { type: Number, default: 0 },
-        negotiation: { type: Number, default: 0 }
+        negotiation: { type: Number, default: 0 },
+        languageReliability: { type: Number, default: 0 },
+        lastScoreUpdate: { type: Date, default: Date.now }
     },
     availableCommodities: [{
         itemId: {

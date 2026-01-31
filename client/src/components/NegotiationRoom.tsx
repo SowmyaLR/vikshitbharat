@@ -228,7 +228,10 @@ const NegotiationRoom: React.FC = () => {
     const playNotificationSound = () => {
         try {
             const audio = new Audio('/notification.mp3');
-            audio.play().catch(e => console.log('Audio play failed', e));
+            audio.play().catch(_e => {
+                // Silently fail if notification sound is missing or blocked
+                // console.log('Notification sound not played');
+            });
         } catch (e) { }
     };
 
@@ -289,9 +292,10 @@ const NegotiationRoom: React.FC = () => {
             recognition.onresult = (event: any) => {
                 const text = event.results[0][0].transcript;
                 if (mediaRecorderRef.current) {
+                    const currentMimeType = mediaRecorderRef.current.mimeType;
                     mediaRecorderRef.current.stop();
                     mediaRecorderRef.current.onstop = () => {
-                        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                        const audioBlob = new Blob(audioChunksRef.current, { type: currentMimeType });
                         uploadAndSend(text, audioBlob);
                     };
                 }
@@ -317,7 +321,8 @@ const NegotiationRoom: React.FC = () => {
 
         if (audioBlob) {
             const formData = new FormData();
-            formData.append('audio', audioBlob, 'voice-message.webm');
+            const extension = audioBlob.type.includes('mp4') ? 'mp4' : 'webm';
+            formData.append('audio', audioBlob, `voice-message.${extension}`);
             try {
                 const response = await fetch('http://localhost:3000/api/upload-audio', {
                     method: 'POST',

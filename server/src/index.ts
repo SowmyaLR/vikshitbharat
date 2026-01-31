@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
@@ -14,6 +15,7 @@ import { Vendor } from './models/Vendor';
 import { Conversation } from './models/Conversation';
 import { Deal } from './models/Deal';
 import { User } from './models/User';
+import { trustScoringService } from './services/TrustScoringService';
 
 dotenv.config();
 
@@ -86,17 +88,11 @@ app.get('/api/vendors', async (req, res) => {
         const formattedVendors = vendors.map((v: any) => ({
             id: v._id,
             name: v.businessName,
-            trustScore: v.trustScore.overall,
-            confidenceLevel: v.trustScore.overall > 80 ? "High" : "Medium",
+            trustScore: v.trustScore,
+            totalDeals: v.totalDeals || 0,
             availableCommodities: v.availableCommodities.map((c: any) => c.name),
             location: v.location,
-            reputationSummary: v.reputationSummary,
-            scores: {
-                priceHonesty: v.trustScore.priceHonesty / 100,
-                fulfillment: v.trustScore.fulfillment / 100,
-                negotiation: v.trustScore.negotiation / 100,
-                language: 0.85
-            }
+            reputationSummary: v.reputationSummary
         }));
 
         res.json(formattedVendors);
@@ -428,6 +424,18 @@ io.on('connection', (socket) => {
             timestamp: new Date()
         });
 
+        // Background Task: Language Reliability (LRS) trigger for disputes
+        const lowerMsg = data.text.toLowerCase();
+        const disputeKeywords = ['wrong translation', 'misunderstood', 'fraud', 'cheat', 'not correct', 'गलत', 'धोखा'];
+        // Background Task: Language Reliability (LRS) trigger for disputes
+        if (disputeKeywords.some(k => lowerMsg.includes(k))) {
+            const parts = data.roomId.split('-');
+            const vendorId = parts[1];
+            if (vendorId && mongoose.Types.ObjectId.isValid(vendorId)) {
+                trustScoringService.triggerDisputeUpdate(vendorId);
+            }
+        }
+
         // 5. AI Negotiation (Mediator)
         // Checks both Buyer and Seller messages
         const commodity = conversation.commodity || 'Wheat'; // Source of Truth
@@ -530,7 +538,26 @@ io.on('connection', (socket) => {
             }
 
             io.to(dealData.roomId).emit('deal_created', newDeal);
-            console.log(`[Deal] Created: ${newDeal._id}. Conversation Closed.`);
+            console.log(`✅ [Deal] Created: ${newDeal._id}. Triggering background trust updates.`);
+
+            // Background Task: Update Trust Scores (Recalculate all 3 on Deal)
+            // Extract vendor ID safely from roomId (Format: room-vendorId-buyerId-timestamp)
+            try {
+                const parts = dealData.roomId.split('-');
+                if (parts.length >= 2) {
+                    const vendorId = parts[1];
+                    if (mongoose.Types.ObjectId.isValid(vendorId)) {
+                        // Run in background without awaiting to keep UI responsive
+                        trustScoringService.updateScoresOnDeal(dealData.roomId, vendorId).catch(err =>
+                            console.error('[TrustScore] Background update failed:', err)
+                        );
+                    } else {
+                        console.warn(`[TrustScore] Invalid VendorId in roomId: ${vendorId}`);
+                    }
+                }
+            } catch (calcError) {
+                console.error('[TrustScore] Error initiating background calculation:', calcError);
+            }
         } catch (err) {
             console.error("Error creating deal:", err);
         }
@@ -683,10 +710,6 @@ io.on('connection', (socket) => {
                 timestamp: new Date()
             } as any);
 
-            await conversation.save();
-
-            // Note: NO conversation_closed event here, let them chat!
-
         } else if (decision === 'counter') {
             (conversation as any).negotiationPhase = 'buyer_counter_review';
             (conversation as any).counterOffer = { price: counterPrice };
@@ -725,7 +748,7 @@ io.on('connection', (socket) => {
                 }
             } as any);
 
-            // Add AI insight about counter-offer
+            // Add AI insight if exists
             if (counterEvaluation.insight) {
                 conversation.messages.push({
                     sender: 'ai_mediator',
@@ -737,6 +760,15 @@ io.on('connection', (socket) => {
                     spokenLanguage: 'en',
                     timestamp: new Date()
                 } as any);
+            }
+
+            // Background Task: Update Negotiation Stability (NSS) on Counter-Offer
+            if (counterPrice) {
+                const parts = roomId.split('-');
+                const vendorId = parts[1];
+                if (vendorId && mongoose.Types.ObjectId.isValid(vendorId)) {
+                    trustScoringService.updateNSSOnCounter(roomId, vendorId, counterPrice);
+                }
             }
 
         } else if (decision === 'reject') {
@@ -756,8 +788,6 @@ io.on('connection', (socket) => {
                 spokenLanguage: 'en',
                 timestamp: new Date()
             } as any);
-
-            await conversation.save();
 
             io.to(roomId).emit('conversation_closed', {
                 reason: 'deal_failed',

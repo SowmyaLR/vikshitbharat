@@ -182,7 +182,9 @@ const SellerInterface: React.FC = () => {
     const playNotificationSound = () => {
         try {
             const audio = new Audio('/notification.mp3');
-            audio.play().catch(e => console.log('Audio play failed', e));
+            audio.play().catch(_e => {
+                // Silently fail if notification sound is missing or blocked
+            });
         } catch (e) { }
     };
 
@@ -227,9 +229,10 @@ const SellerInterface: React.FC = () => {
             recognition.onresult = (event: any) => {
                 const text = event.results[0][0].transcript;
                 if (mediaRecorderRef.current) {
+                    const currentMimeType = mediaRecorderRef.current.mimeType;
                     mediaRecorderRef.current.stop();
                     mediaRecorderRef.current.onstop = () => {
-                        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                        const audioBlob = new Blob(audioChunksRef.current, { type: currentMimeType });
                         uploadAndSend(text, audioBlob);
                     };
                 }
@@ -252,7 +255,8 @@ const SellerInterface: React.FC = () => {
         let audioUrl = '';
         if (audioBlob) {
             const formData = new FormData();
-            formData.append('audio', audioBlob, 'voice-message.webm');
+            const extension = audioBlob.type.includes('mp4') ? 'mp4' : 'webm';
+            formData.append('audio', audioBlob, `voice-message.${extension}`);
             try {
                 const response = await fetch('http://localhost:3000/api/upload-audio', {
                     method: 'POST', body: formData
@@ -317,12 +321,16 @@ const SellerInterface: React.FC = () => {
     };
 
     const finalizeDeal = () => {
+        const parts = roomId?.split('-');
+        const vendorId = parts?.[1] || 'seller-1';
+        const buyerId = parts?.[2] || 'buyer-1';
+
         const dealData = {
             roomId,
             items: draftItems,
             totalAmount: draftTotal,
-            buyerId: 'buyer-1',
-            sellerId: 'seller-1'
+            buyerId: buyerId,
+            sellerId: vendorId
         };
         console.log('📤 Finalizing Deal:', dealData);
         socket?.emit('create_deal', dealData);

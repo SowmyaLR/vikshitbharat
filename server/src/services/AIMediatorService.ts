@@ -185,10 +185,23 @@ export class AIMediatorService {
         }
     }
 
-    async extractDealTerms(history: any[]): Promise<{ items: any[], total: number } | null> {
+    async extractDealTerms(history: any[], commodity: string = "Produce"): Promise<{ items: any[], totalAmount: number } | null> {
         try {
             const chatText = history.map(h => `${h.sender}: ${h.message}`).join('\n');
-            const prompt = `Extract items, quantities, and prices. Return JSON: { "items": [{ "name": "Item", "quantity": "Qty", "price": 0, "total": 0 }], "totalAmount": 0 }. Return null if no clear agreement.\n\nChat:\n${chatText}`;
+            const prompt = `Task: Identify the SINGLE final agreed-upon trade terms for ${commodity}.
+            Ignore previous rejected offers or counter-offers. Only extract the most recent successfully agreed-upon deal.
+            
+            Note on Prices: Prices may be mentioned in decimals (e.g. "21 50 காசு" means 21.50). 
+            Do NOT confuse sub-currency units (like paise) as quantities.
+            
+            Extract:
+            - Item Name (should be "${commodity}")
+            - Quantity (e.g. "100kg")
+            - Price (e.g. 21.5)
+            - Total (quantity * price)
+            
+            Return JSON in this EXACT format: { "items": [{ "name": "${commodity}", "quantity": "100kg", "price": 0, "total": 0 }], "totalAmount": 0 }. 
+            Return null if no clear agreement exists.\n\nChat:\n${chatText}`;
             console.log(`[Deal Extraction] Prompt: ${prompt}`);
 
             let res = "";
@@ -198,7 +211,7 @@ export class AIMediatorService {
             }
             if (res) {
                 const data = JSON.parse(res);
-                return data && data.items ? { items: data.items, total: data.totalAmount } : null;
+                return data && data.items ? { items: data.items, totalAmount: data.totalAmount } : null;
             }
             return null;
         } catch (error) {
@@ -297,7 +310,7 @@ export class AIMediatorService {
 
         let extractedDeal = null;
         if (dealTrigger || history.length >= 2) {
-            extractedDeal = await this.extractDealTerms(history);
+            extractedDeal = await this.extractDealTerms(history, commodity);
         }
 
         // ONLY CALL LLM IF TRIGGERS MET

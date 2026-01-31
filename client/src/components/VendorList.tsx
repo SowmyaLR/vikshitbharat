@@ -6,17 +6,16 @@ import { MapPin, ArrowRight, ArrowLeft } from 'lucide-react';
 interface Vendor {
     id: string;
     name: string;
-    trustScore: number;
-    confidenceLevel: string;
+    trustScore: {
+        overall: number;
+        priceHonesty: number;
+        negotiation: number;
+        languageReliability: number;
+    };
+    totalDeals: number;
     availableCommodities: string[];
     location: { mandiName: string; state: string };
     reputationSummary: string;
-    scores: {
-        priceHonesty: number;
-        fulfillment: number;
-        negotiation: number;
-        language: number;
-    };
 }
 
 const VendorList: React.FC = () => {
@@ -91,14 +90,14 @@ const VendorList: React.FC = () => {
                                         {vendor.location.mandiName}, {vendor.location.state}
                                     </div>
                                 </div>
-                                <span className={`px-2 py-1 rounded text-xs font-medium ${vendor.confidenceLevel === 'High' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
-                                    }`}>
-                                    {vendor.confidenceLevel} Confidence
-                                </span>
                             </div>
 
                             <div className="mb-4">
-                                <TrustScore score={vendor.trustScore} breakdown={vendor.scores} />
+                                <TrustScore
+                                    score={vendor.trustScore.overall}
+                                    totalDeals={vendor.totalDeals}
+                                    breakdown={vendor.trustScore}
+                                />
                             </div>
 
                             <div className="mb-4">
@@ -125,8 +124,9 @@ const VendorList: React.FC = () => {
                         </div>
                     ))}
                 </div>
-            )}
-        </div>
+            )
+            }
+        </div >
     );
 };
 
