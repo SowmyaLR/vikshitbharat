@@ -33,9 +33,10 @@ const VendorLobby: React.FC = () => {
     const handleStartNegotiation = () => {
         if (selectedItems.length > 0) {
             // Generate a unique Room ID for this session
-            // Format: room-{vendorId}-{buyerId}
+            // Format: room-{vendorId}-{buyerId}-{timestamp}
             const buyerId = localStorage.getItem('userId') || 'anon';
-            const uniqueRoomId = `room-${vendorId}-${buyerId}`;
+            const timestamp = Date.now();
+            const uniqueRoomId = `room-${vendorId}-${buyerId}-${timestamp}`;
 
             navigate(`/negotiate/${uniqueRoomId}?items=${selectedItems.join(',')}&location=${vendor?.location.mandiName}&vendorId=${vendorId}`);
         }

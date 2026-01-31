@@ -134,9 +134,10 @@ export class AIMediatorService {
         }
 
         // 3. Repeated Offer Trigger
-        const lastMsgWithPrice = [...history].reverse().find(h => h.message.match(/\d+/));
+        const lastMsgWithPrice = [...history].reverse().find(h => h?.message?.match(/\d+/) || h?.originalText?.match(/\d+/));
         if (offerPrice && lastMsgWithPrice) {
-            const lastPriceMatch = lastMsgWithPrice.message.match(/\d+/);
+            const msgText = lastMsgWithPrice.message || lastMsgWithPrice.originalText || '';
+            const lastPriceMatch = msgText.match(/\d+/);
             if (lastPriceMatch && parseInt(lastPriceMatch[0]) === offerPrice) {
                 repeatTrigger = true;
             }

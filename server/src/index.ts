@@ -305,14 +305,29 @@ io.on('connection', (socket) => {
         let conversation = await Conversation.findOne({ roomId: data.roomId });
         const history = conversation ? conversation.messages : [];
 
-        // 2. Safety Check (AI Moderation) - Now Optimized
-        const safetyCheck = await aiMediator.checkSafety(data.text, history);
-        if (!safetyCheck.isSafe) {
-            console.warn(`🚫 Blocked unsafe message from ${data.sender}: ${data.text}`);
-            socket.emit('moderation_warning', {
-                reason: safetyCheck.reason || "Message blocked due to policy violation."
-            });
-            return;
+        // 2. Safety Check (AI Moderation) - Only during structured negotiation
+        const currentPhase = conversation ? (conversation as any).negotiationPhase : 'greeting';
+
+        // Skip AI safety checks during free chat phase (only check banned words locally)
+        if (currentPhase !== 'chat') {
+            const safetyCheck = await aiMediator.checkSafety(data.text, history);
+            if (!safetyCheck.isSafe) {
+                console.warn(`🚫 Blocked unsafe message from ${data.sender}: ${data.text}`);
+                socket.emit('moderation_warning', {
+                    reason: safetyCheck.reason || "Message blocked due to policy violation."
+                });
+                return;
+            }
+        } else {
+            // Light check: only banned words during chat phase
+            const bannedWords = ['idiot', 'stupid', 'scam', 'cheat', 'fraud', 'moorka', 'badava', 'poda'];
+            if (bannedWords.some(word => data.text.toLowerCase().includes(word))) {
+                console.warn(`🚫 Blocked banned word during chat from ${data.sender}`);
+                socket.emit('moderation_warning', {
+                    reason: "Offensive language detected. Please maintain professional behavior."
+                });
+                return;
+            }
         }
 
         if (!conversation) {
