@@ -65,6 +65,10 @@ const NegotiationRoom: React.FC = () => {
 
     const [prices, setPrices] = useState<PriceData[]>([]);
 
+    // Closure State
+    const [isClosed, setIsClosed] = useState(false);
+    const [closureData, setClosureData] = useState<{ reason: string, message: string, dealId?: string } | null>(null);
+
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const recognitionRef = useRef<any>(null);
@@ -184,6 +188,9 @@ const NegotiationRoom: React.FC = () => {
             if (data.aiInsight) setAiInsight(data.aiInsight);
             if (data.structuredOffer) setStructuredOffer(data.structuredOffer);
             if (data.isTooLow !== undefined) setIsTooLow(data.isTooLow);
+            if (data.status && ['deal_success', 'deal_failed', 'abandoned'].includes(data.status)) {
+                setIsClosed(true);
+            }
         });
 
         newSocket.on('ai_insight', (data: { insight: string }) => {
@@ -198,9 +205,19 @@ const NegotiationRoom: React.FC = () => {
         });
 
         newSocket.on('decision_update', (data: any) => {
-            if (data.phase === 'chat') {
-                setPhase('chat');
+            if (data.phase) {
+                console.log('🔄 Decision Phase Sync:', data.phase);
+                setPhase(data.phase);
             }
+            if (data.status && ['deal_success', 'deal_failed', 'abandoned'].includes(data.status)) {
+                setIsClosed(true);
+            }
+        });
+
+        newSocket.on('conversation_closed', (data: { reason: string, message: string, dealId?: string }) => {
+            console.log('🔒 Conversation Closed:', data);
+            setIsClosed(true);
+            setClosureData(data);
         });
 
         return () => {
@@ -315,14 +332,21 @@ const NegotiationRoom: React.FC = () => {
         sendMessage(text, audioUrl);
     };
 
+    const handleEndNegotiation = () => {
+        if (window.confirm("End this negotiation? This will close the chat for both parties.")) {
+            socket?.emit('end_negotiation', { roomId, userId: localStorage.getItem('userId') });
+        }
+    };
+
     const sendMessage = (text: string, audioUrl?: string) => {
-        if (socket && text) {
+        if (socket && text && !isClosed) { // Added !isClosed check
             console.log('📤 Sending message:', text);
             socket.emit('send_message', {
                 roomId: roomId,
                 text: text,
                 audioUrl: audioUrl,
                 sender: 'buyer',
+                senderName: localStorage.getItem('userName') || 'Buyer', // Added senderName
                 language: myLanguage,
                 commodity: item || 'Wheat',
                 location: location || 'Delhi',
@@ -667,6 +691,7 @@ const NegotiationRoom: React.FC = () => {
                                 <button
                                     onClick={() => {
                                         socket?.emit('buyer_decision', { roomId, decision: 'reject' });
+                                        setPhase('chat');
                                     }}
                                     className="flex-1 bg-red-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-red-700 transition-all"
                                 >
@@ -676,28 +701,68 @@ const NegotiationRoom: React.FC = () => {
                         </div>
                     )}
 
-                    {phase === 'chat' && (
-                        <div className="flex gap-2 items-center">
-                            <button
-                                onClick={() => isListening ? stopListening() : startListening()}
-                                className={`p-4 rounded-full transition-all ${isListening ? 'bg-red-500 animate-pulse text-white' : 'bg-green-100 hover:bg-green-200 text-green-700'}`}
-                            >
-                                {isListening ? <MicOff /> : <Mic />}
-                            </button>
-                            <input
-                                type="text"
-                                value={inputText}
-                                onChange={(e) => setInputText(e.target.value)}
-                                placeholder="Type or speak..."
-                                className="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-green-500"
-                                onKeyDown={(e) => e.key === 'Enter' && uploadAndSend(inputText, null)}
-                            />
-                            <button
-                                onClick={() => uploadAndSend(inputText, null)}
-                                className="p-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                            >
-                                <Send />
-                            </button>
+                    {phase === 'chat' && !isClosed && (
+                        <div className="flex flex-col gap-2">
+                            <div className="flex justify-end mb-2">
+                                <button
+                                    onClick={handleEndNegotiation}
+                                    className="text-xs font-bold text-red-500 hover:text-red-700 flex items-center gap-1 bg-red-50 px-3 py-1 rounded-full border border-red-100 transition-all"
+                                >
+                                    🚪 End Negotiation
+                                </button>
+                            </div>
+                            <div className="flex gap-2 items-center">
+                                <button
+                                    onClick={() => isListening ? stopListening() : startListening()}
+                                    className={`p-4 rounded-full transition-all ${isListening ? 'bg-red-500 animate-pulse text-white' : 'bg-green-100 hover:bg-green-200 text-green-700'}`}
+                                >
+                                    {isListening ? <MicOff /> : <Mic />}
+                                </button>
+                                <input
+                                    type="text"
+                                    value={inputText}
+                                    onChange={(e) => setInputText(e.target.value)}
+                                    placeholder="Type or speak..."
+                                    className="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-green-500"
+                                    onKeyDown={(e) => e.key === 'Enter' && uploadAndSend(inputText, null)}
+                                />
+                                <button
+                                    onClick={() => uploadAndSend(inputText, null)}
+                                    className="p-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                                >
+                                    <Send />
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {isClosed && (
+                        <div className="bg-gray-100 p-8 rounded-2xl border-2 border-dashed border-gray-300 text-center animate-in fade-in zoom-in duration-500">
+                            <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center text-gray-400 mx-auto mb-4 text-2xl">
+                                {closureData?.reason === 'deal_success' ? '✅' : '🔒'}
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-800 mb-2">
+                                {closureData?.reason === 'deal_success' ? 'Negotiation Successful!' : 'Conversation Closed'}
+                            </h3>
+                            <p className="text-gray-600 mb-6 max-w-md mx-auto">
+                                {closureData?.message || 'This negotiation has ended and the chat is now read-only for audit purposes.'}
+                            </p>
+                            <div className="flex gap-3 justify-center">
+                                {closureData?.dealId && (
+                                    <button
+                                        onClick={() => window.location.href = `/deals/${closureData.dealId}`}
+                                        className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-green-700 transition-all"
+                                    >
+                                        View Deal Details
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => window.history.back()}
+                                    className="bg-white text-gray-700 border border-gray-300 px-6 py-2 rounded-lg font-bold hover:bg-gray-50 transition-all"
+                                >
+                                    Back to Lobby
+                                </button>
+                            </div>
                         </div>
                     )}
 

@@ -47,9 +47,13 @@ const SellerInterface: React.FC = () => {
     const [messagesEndRef] = [useRef<HTMLDivElement>(null)];
 
     // AI-Led Deal Room State
-    const [phase, setPhase] = useState<'greeting' | 'offer' | 'seller_review' | 'chat'>('greeting');
+    const [phase, setPhase] = useState<'greeting' | 'offer' | 'seller_review' | 'buyer_counter_review' | 'chat'>('greeting');
     const [structuredOffer, setStructuredOffer] = useState<{ quantity: number, price: number, purpose?: string } | null>(null);
     const [isTooLow, setIsTooLow] = useState(false);
+
+    // Closure State
+    const [isClosed, setIsClosed] = useState(false);
+    const [closureData, setClosureData] = useState<{ reason: string, message: string, dealId?: string } | null>(null);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -83,6 +87,9 @@ const SellerInterface: React.FC = () => {
             if (data.phase) setPhase(data.phase);
             if (data.structuredOffer) setStructuredOffer(data.structuredOffer);
             if (data.isTooLow !== undefined) setIsTooLow(data.isTooLow);
+            if (data.status && ['deal_success', 'deal_failed', 'abandoned'].includes(data.status)) {
+                setIsClosed(true);
+            }
         });
 
         newSocket.on('chat_history', (history: Message[]) => {
@@ -128,9 +135,19 @@ const SellerInterface: React.FC = () => {
         });
 
         newSocket.on('decision_update', (data: any) => {
-            if (data.phase === 'chat') {
-                setPhase('chat');
+            if (data.phase) {
+                console.log('🔄 Decision Phase Sync:', data.phase);
+                setPhase(data.phase);
             }
+            if (data.status && ['deal_success', 'deal_failed', 'abandoned'].includes(data.status)) {
+                setIsClosed(true);
+            }
+        });
+
+        newSocket.on('conversation_closed', (data: { reason: string, message: string, dealId?: string }) => {
+            console.log('🔒 Conversation Closed:', data);
+            setIsClosed(true);
+            setClosureData(data);
         });
 
         return () => {
@@ -557,6 +574,42 @@ const SellerInterface: React.FC = () => {
                     {phase === 'offer' && (
                         <div className="text-center p-6 text-indigo-400 italic text-sm animate-pulse">
                             Buyer is currently drafting their structured offer...
+                        </div>
+                    )}
+
+                    {phase === 'buyer_counter_review' && (
+                        <div className="text-center p-6 text-orange-400 italic text-sm animate-pulse">
+                            Waiting for buyer to review your counter-offer...
+                        </div>
+                    )}
+
+                    {isClosed && (
+                        <div className="bg-gray-100 p-8 rounded-2xl border-2 border-dashed border-gray-300 text-center animate-in fade-in zoom-in duration-500">
+                            <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center text-gray-400 mx-auto mb-4 text-2xl">
+                                {closureData?.reason === 'deal_success' ? '✅' : '🔒'}
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-800 mb-2">
+                                {closureData?.reason === 'deal_success' ? 'Negotiation Successful!' : 'Conversation Closed'}
+                            </h3>
+                            <p className="text-gray-600 mb-6 max-w-md mx-auto">
+                                {closureData?.message || 'This negotiation has ended and the chat is now read-only for audit purposes.'}
+                            </p>
+                            <div className="flex gap-3 justify-center">
+                                {closureData?.dealId && (
+                                    <button
+                                        onClick={() => window.location.href = `/deals/${closureData.dealId}`}
+                                        className="bg-orange-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-orange-700 transition-all"
+                                    >
+                                        View Deal Details
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => window.history.back()}
+                                    className="bg-white text-gray-700 border border-gray-300 px-6 py-2 rounded-lg font-bold hover:bg-gray-50 transition-all"
+                                >
+                                    Back to Lobby
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>

@@ -116,12 +116,47 @@ app.get('/api/conversations/vendor/:vendorId', async (req, res) => {
     try {
         const { vendorId } = req.params;
         // Search conversation by roomId prefix
-        const conversations = await Conversation.find({ roomId: new RegExp(`^room-${vendorId}-`) })
+        const conversations = await Conversation.find({
+            roomId: new RegExp(`^room-${vendorId}-`),
+            status: { $in: ['active', 'pending', 'deal_room'] } // Only active/pending
+        })
             .sort({ lastActivityAt: -1 })
             .limit(10);
         res.json(conversations);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch conversations' });
+    }
+});
+
+// GET /api/conversations/history/:userId - List closed conversations
+app.get('/api/conversations/history/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const conversations = await Conversation.find({
+            $or: [
+                { 'buyer.id': userId },
+                { 'vendor.id': userId }
+            ],
+            status: { $in: ['deal_success', 'deal_failed', 'abandoned'] }
+        })
+            .sort({ closedAt: -1 })
+            .limit(50);
+        res.json(conversations);
+    } catch (error) {
+        console.error('Error fetching history:', error);
+        res.status(500).json({ error: 'Failed to fetch history' });
+    }
+});
+
+// GET /api/conversations/:id/history - Get specific conversation (read-only)
+app.get('/api/conversations/:id/history', async (req, res) => {
+    try {
+        const conversation = await Conversation.findById(req.params.id)
+            .populate('finalDealId');
+        if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
+        res.json(conversation);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch conversation details' });
     }
 });
 
@@ -141,33 +176,41 @@ io.on('connection', (socket) => {
 
         let conversation;
         try {
-            conversation = await Conversation.findOne({ roomId });
-
-            if (!conversation) {
-                // Pre-initialize conversation with buyer info
-                conversation = new Conversation({
-                    roomId,
-                    commodity: commodityRaw,
-                    location: { mandiName: buyerLocation, state: 'Delhi' },
-                    buyer: { name: buyerName },
-                    status: 'deal_room',
-                    negotiationPhase: 'greeting'
-                });
-                await conversation.save();
-            } else {
-                // Update existing conversation if details are missing
-                if (!conversation.commodity) {
-                    conversation.commodity = commodityRaw;
-                }
-
-                if (typeof data === 'object') {
-                    if (!conversation.buyer?.name || conversation.buyer.name === 'Buyer') {
-                        (conversation as any).buyer = { ...conversation.buyer, name: buyerName };
+            // Use findOneAndUpdate with upsert to prevent race conditions (E11000)
+            conversation = await Conversation.findOneAndUpdate(
+                { roomId },
+                {
+                    $setOnInsert: {
+                        roomId,
+                        commodity: commodityRaw,
+                        location: { mandiName: buyerLocation, state: 'Delhi' },
+                        buyer: { name: buyerName },
+                        status: 'deal_room',
+                        negotiationPhase: 'greeting'
                     }
-                    if (data.commodity && conversation.commodity === 'Wheat' && data.commodity !== 'Wheat') {
-                        conversation.commodity = data.commodity;
-                    }
+                },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+
+            // Parallel updates: if it's an existing room, verify details
+            let needsUpdate = false;
+            if (!conversation.commodity) {
+                conversation.commodity = commodityRaw;
+                needsUpdate = true;
+            }
+
+            if (typeof data === 'object') {
+                if (!conversation.buyer?.name || conversation.buyer.name === 'Buyer') {
+                    (conversation as any).buyer = { ...conversation.buyer, name: buyerName };
+                    needsUpdate = true;
                 }
+                if (data.commodity && conversation.commodity === 'Wheat' && data.commodity !== 'Wheat') {
+                    conversation.commodity = data.commodity;
+                    needsUpdate = true;
+                }
+            }
+
+            if (needsUpdate) {
                 await conversation.save();
             }
 
@@ -464,13 +507,30 @@ io.on('connection', (socket) => {
         console.log(`[Deal] Preview update for room ${data.roomId}`);
     });
 
-    socket.on('create_deal', async (dealData) => {
+    socket.on('create_deal', async (dealData: any) => {
         try {
             // dealData: { roomId, items, totalAmount, buyerId, sellerId }
             const newDeal = new Deal(dealData);
             await newDeal.save();
+
+            // Success Path: Close Conversation
+            const conversation = await Conversation.findOne({ roomId: dealData.roomId });
+            if (conversation) {
+                conversation.status = 'deal_success';
+                (conversation as any).closedAt = new Date();
+                (conversation as any).closureReason = 'deal_created';
+                (conversation as any).finalDealId = newDeal._id;
+                await conversation.save();
+
+                io.to(dealData.roomId).emit('conversation_closed', {
+                    reason: 'deal_success',
+                    message: '✅ Deal finalized! This conversation is now closed.',
+                    dealId: newDeal._id
+                });
+            }
+
             io.to(dealData.roomId).emit('deal_created', newDeal);
-            console.log(`[Deal] Created: ${newDeal._id}`);
+            console.log(`[Deal] Created: ${newDeal._id}. Conversation Closed.`);
         } catch (err) {
             console.error("Error creating deal:", err);
         }
@@ -611,16 +671,21 @@ io.on('connection', (socket) => {
             (conversation as any).negotiationPhase = 'chat';
 
             // Add acceptance message to chat
+            const acceptMsg = `✅ Seller accepted your offer of ₹${(conversation as any).structuredOffer?.price}/kg for ${(conversation as any).structuredOffer?.quantity}kg.`;
             conversation.messages.push({
                 sender: 'ai_mediator',
                 senderName: 'AI Mediator',
-                originalText: `✅ Seller accepted your offer of ₹${(conversation as any).structuredOffer?.price}/kg for ${(conversation as any).structuredOffer?.quantity}kg.`,
-                translatedText: `✅ Seller accepted your offer of ₹${(conversation as any).structuredOffer?.price}/kg for ${(conversation as any).structuredOffer?.quantity}kg.`,
+                originalText: acceptMsg,
+                translatedText: acceptMsg,
                 // @ts-ignore
                 messageType: 'text',
                 spokenLanguage: 'en',
                 timestamp: new Date()
             } as any);
+
+            await conversation.save();
+
+            // Note: NO conversation_closed event here, let them chat!
 
         } else if (decision === 'counter') {
             (conversation as any).negotiationPhase = 'buyer_counter_review';
@@ -675,19 +740,29 @@ io.on('connection', (socket) => {
             }
 
         } else if (decision === 'reject') {
-            conversation.status = 'cancelled';
+            conversation.status = 'deal_failed';
+            (conversation as any).closedAt = new Date();
+            (conversation as any).closureReason = 'seller_rejected';
 
             // Add rejection message
+            const rejectMsg = `❌ Seller rejected the offer of ₹${(conversation as any).structuredOffer?.price}/kg. This negotiation is closed.`;
             conversation.messages.push({
                 sender: 'ai_mediator',
                 senderName: 'AI Mediator',
-                originalText: `❌ Seller rejected the offer of ₹${(conversation as any).structuredOffer?.price}/kg.`,
-                translatedText: `❌ Seller rejected the offer of ₹${(conversation as any).structuredOffer?.price}/kg.`,
+                originalText: rejectMsg,
+                translatedText: rejectMsg,
                 // @ts-ignore
                 messageType: 'text',
                 spokenLanguage: 'en',
                 timestamp: new Date()
             } as any);
+
+            await conversation.save();
+
+            io.to(roomId).emit('conversation_closed', {
+                reason: 'deal_failed',
+                message: '❌ Seller declined the offer. Conversation closed.'
+            });
         }
 
         await conversation.save();
@@ -715,6 +790,47 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('end_negotiation', async (data) => {
+        const { roomId, userId } = data;
+        let conversation = await Conversation.findOne({ roomId });
+        if (!conversation) return;
+
+        console.log(`🚪 Manual End Negotiation for ${roomId} by ${userId}`);
+
+        conversation.status = 'deal_failed';
+        (conversation as any).closedAt = new Date();
+        (conversation as any).closureReason = 'mutually_ended';
+        (conversation as any).endedBy = userId;
+
+        const endMsg = `🤝 This negotiation was ended manually. Conversation is now closed for audit.`;
+        conversation.messages.push({
+            sender: 'ai_mediator',
+            senderName: 'AI Mediator',
+            originalText: endMsg,
+            translatedText: endMsg,
+            // @ts-ignore
+            messageType: 'text',
+            spokenLanguage: 'en',
+            timestamp: new Date()
+        } as any);
+
+        await conversation.save();
+
+        io.to(roomId).emit('conversation_closed', {
+            reason: 'mutually_ended',
+            message: '🤝 Negotiation ended manually.'
+        });
+
+        io.to(roomId).emit('new_message', {
+            id: Date.now().toString(),
+            sender: 'ai_mediator',
+            senderName: 'AI Mediator',
+            originalText: endMsg,
+            translatedText: endMsg,
+            timestamp: new Date()
+        });
+    });
+
     socket.on('buyer_decision', async (data) => {
         const { roomId, decision } = data;
         let conversation = await Conversation.findOne({ roomId });
@@ -726,12 +842,12 @@ io.on('connection', (socket) => {
             conversation.status = 'active';
             (conversation as any).negotiationPhase = 'chat';
 
-            // Add acceptance message
+            const acceptMsg = `✅ Buyer accepted the counter-offer. Deal finalized! Free chat is now open.`;
             conversation.messages.push({
                 sender: 'ai_mediator',
                 senderName: 'AI Mediator',
-                originalText: `✅ Buyer accepted the counter-offer. Deal finalized! Free chat is now open.`,
-                translatedText: `✅ Buyer accepted the counter-offer. Deal finalized! Free chat is now open.`,
+                originalText: acceptMsg,
+                translatedText: acceptMsg,
                 // @ts-ignore
                 messageType: 'text',
                 spokenLanguage: 'en',
@@ -739,13 +855,14 @@ io.on('connection', (socket) => {
             } as any);
         } else if (decision === 'reject') {
             (conversation as any).negotiationPhase = 'chat';
+            conversation.status = 'active';
 
-            // Add rejection message
+            const rejectMsg = `🔄 Buyer rejected the counter-offer. Continuing with open negotiation.`;
             conversation.messages.push({
                 sender: 'ai_mediator',
                 senderName: 'AI Mediator',
-                originalText: `Buyer rejected the counter-offer. Continuing with open negotiation.`,
-                translatedText: `Buyer rejected the counter-offer. Continuing with open negotiation.`,
+                originalText: rejectMsg,
+                translatedText: rejectMsg,
                 // @ts-ignore
                 messageType: 'text',
                 spokenLanguage: 'en',
@@ -776,6 +893,36 @@ io.on('connection', (socket) => {
         });
     });
     // -----------------------
+
+    // Automatic Closure Check (STALE CONVERSATIONS)
+    // Runs every hour
+    setInterval(async () => {
+        console.log('⏰ Running automatic closure check for stale conversations...');
+        try {
+            const now = new Date();
+            const activeConversations = await Conversation.find({ status: 'active' });
+
+            for (const conv of activeConversations) {
+                const autoCloseHours = (conv as any).autoCloseHours || 24;
+                const cutoffTime = new Date(Date.now() - autoCloseHours * 60 * 60 * 1000);
+
+                if (conv.lastActivityAt < cutoffTime) {
+                    console.log(`🔒 Auto-closing stale conversation: ${conv.roomId}`);
+                    conv.status = 'abandoned';
+                    (conv as any).closedAt = now;
+                    (conv as any).closureReason = 'timeout_stale';
+                    await conv.save();
+
+                    io.to(conv.roomId).emit('conversation_closed', {
+                        reason: 'abandoned',
+                        message: '⏰ Conversation closed due to inactivity.'
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Error in automatic closure job:', err);
+        }
+    }, 60 * 60 * 1000); // 1 hour
 
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);

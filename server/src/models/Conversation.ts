@@ -19,6 +19,11 @@ export interface IConversation extends Document {
     startedAt: Date;
     completedAt: Date;
     lastActivityAt: Date;
+    closedAt?: Date; // New field
+    closureReason?: string; // New field
+    endedBy?: string; // New field (assuming User ID is string or ObjectId)
+    finalDealId?: mongoose.Types.ObjectId; // New field
+    autoCloseHours?: number; // New field
     addMessage(messageData: any): Promise<IConversation>;
 }
 
@@ -115,12 +120,12 @@ const ConversationSchema = new mongoose.Schema({
     messages: [MessageSchema],
     status: {
         type: String,
-        enum: ['pending', 'active', 'completed', 'cancelled', 'deal_room'],
+        enum: ['pending', 'active', 'completed', 'cancelled', 'deal_room', 'deal_success', 'deal_failed', 'abandoned'], // Updated enum
         default: 'pending'
     },
     negotiationPhase: {
         type: String,
-        enum: ['greeting', 'offer', 'seller_review', 'chat'],
+        enum: ['greeting', 'offer', 'seller_review', 'buyer_counter_review', 'chat'],
         default: 'greeting'
     },
     aiGreeting: String,
@@ -140,13 +145,32 @@ const ConversationSchema = new mongoose.Schema({
     lastActivityAt: {
         type: Date,
         default: Date.now
+    },
+    closedAt: { // New field
+        type: Date
+    },
+    closureReason: { // New field
+        type: String,
+        enum: ['deal_created', 'seller_accepted_offer', 'seller_rejected', 'mutually_ended', 'timeout_stale']
+    },
+    endedBy: { // New field
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User' // Assuming 'User' is the model for users
+    },
+    finalDealId: { // New field
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Deal' // Assuming 'Deal' is the model for deals
+    },
+    autoCloseHours: { // New field
+        type: Number,
+        default: 24 // Default to 24 hours
     }
 }, {
     timestamps: true
 });
 
 // Indexes for efficient queries
-ConversationSchema.index({ roomId: 1 });
+// roomId is already unique: true, which creates an index
 ConversationSchema.index({ 'buyer.id': 1, status: 1 });
 ConversationSchema.index({ 'vendor.id': 1, status: 1 });
 ConversationSchema.index({ startedAt: -1 });

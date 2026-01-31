@@ -7,6 +7,7 @@ import VendorLobby from './components/VendorLobby';
 import SellerInterface from './components/SellerInterface';
 import Login from './components/Login';
 import SellerDashboard from './components/SellerDashboard';
+import ConversationHistory from './components/ConversationHistory';
 
 // Protected Route Component
 const ProtectedRoute = ({ children, isAuthenticated }: { children: React.ReactNode, isAuthenticated: boolean }) => {
@@ -121,6 +122,11 @@ function App() {
             <Route path="/seller/:roomId" element={
               <ProtectedRoute isAuthenticated={isAuthenticated}>
                 <SellerInterface />
+              </ProtectedRoute>
+            } />
+            <Route path="/history/:id" element={
+              <ProtectedRoute isAuthenticated={isAuthenticated}>
+                <ConversationHistory />
               </ProtectedRoute>
             } />
           </Routes>
