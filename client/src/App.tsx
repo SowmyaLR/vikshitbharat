@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-ro
 import LocationSelector from './components/LocationSelector';
 import VendorList from './components/VendorList';
 import NegotiationRoom from './components/NegotiationRoom';
-import ItemSelector from './components/ItemSelector';
+import VendorLobby from './components/VendorLobby';
 import SellerInterface from './components/SellerInterface';
 import Login from './components/Login';
 import SellerDashboard from './components/SellerDashboard';
@@ -104,10 +104,10 @@ function App() {
             } />
             <Route path="/select-item/:vendorId" element={
               <ProtectedRoute isAuthenticated={isAuthenticated}>
-                <ItemSelector />
+                <VendorLobby />
               </ProtectedRoute>
             } />
-            <Route path="/negotiate/:vendorId" element={
+            <Route path="/negotiate/:roomId" element={
               <ProtectedRoute isAuthenticated={isAuthenticated}>
                 <NegotiationRoom />
               </ProtectedRoute>
@@ -118,7 +118,7 @@ function App() {
                 <SellerDashboard />
               </ProtectedRoute>
             } />
-            <Route path="/seller/:vendorId" element={
+            <Route path="/seller/:roomId" element={
               <ProtectedRoute isAuthenticated={isAuthenticated}>
                 <SellerInterface />
               </ProtectedRoute>

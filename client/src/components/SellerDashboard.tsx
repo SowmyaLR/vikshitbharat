@@ -74,18 +74,22 @@ const SellerDashboard: React.FC = () => {
             Notification.requestPermission();
         }
 
-        // Mock some initial notifications for demo
-        setNotifications([
-            {
-                id: 'room-v1',
-                buyerName: 'Rajesh Farmer',
-                item: 'Wheat',
-                location: 'Azadpur Mandi',
-                timestamp: new Date(Date.now() - 5 * 60000),
-                status: 'pending',
-                roomId: 'room-v1'
-            }
-        ]);
+        // Fetch existing conversations
+        fetch(`${SOCKET_URL}/api/conversations/vendor/${userId}`)
+            .then(res => res.json())
+            .then(data => {
+                const existing = data.map((conv: any) => ({
+                    id: conv.roomId,
+                    buyerName: conv.buyer?.name || 'Active Buyer',
+                    item: conv.commodity || 'Wheat',
+                    location: conv.location?.mandiName || 'Delhi',
+                    timestamp: conv.lastActivityAt || new Date(),
+                    status: conv.negotiationPhase === 'chat' ? 'active' : 'pending',
+                    roomId: conv.roomId
+                }));
+                setNotifications(existing);
+            })
+            .catch(err => console.error("Failed to fetch conversations", err));
 
         return () => {
             newSocket.close();
@@ -99,7 +103,7 @@ const SellerDashboard: React.FC = () => {
         );
 
         // Navigate to seller interface for this negotiation
-        navigate(`/seller/${notification.roomId.replace('room-', '')}?item=${notification.item}&location=${notification.location}`);
+        navigate(`/seller/${notification.roomId}?item=${notification.item}&location=${notification.location}`);
     };
 
     const handleRejectNegotiation = (notificationId: string) => {
@@ -215,7 +219,7 @@ const SellerDashboard: React.FC = () => {
 
                                     {notification.status === 'active' && (
                                         <button
-                                            onClick={() => navigate(`/seller/${notification.roomId.replace('room-', '')}?item=${notification.item}&location=${notification.location}`)}
+                                            onClick={() => navigate(`/seller/${notification.roomId}?item=${notification.item}&location=${notification.location}`)}
                                             className="w-full bg-orange-600 hover:bg-orange-700 text-white py-3 rounded-xl font-semibold transition-colors"
                                         >
                                             Continue Negotiation →

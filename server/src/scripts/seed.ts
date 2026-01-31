@@ -187,6 +187,58 @@ async function seedDatabase() {
                 reputationSummary: 'Good quality vegetables, fair prices',
                 totalDeals: 95,
                 isActive: true
+            },
+            {
+                userId: sellers[0]._id, // Using Ramesh's ID for simplicity
+                businessName: 'Cheap Ramesh (Low-ball Rice)',
+                location: {
+                    state: 'Delhi',
+                    district: 'North Delhi',
+                    mandiName: 'Azadpur Mandi'
+                },
+                trustScore: {
+                    overall: 60,
+                    priceHonesty: 40,
+                    fulfillment: 80,
+                    negotiation: 70
+                },
+                availableCommodities: [
+                    {
+                        itemId: items[1]._id,
+                        name: 'Rice',
+                        currentStock: 1000,
+                        pricePerQuintal: 1500 // ₹15/kg (Unfairly Low)
+                    }
+                ],
+                reputationSummary: 'Suspiciously low prices, potential quality issues',
+                totalDeals: 50,
+                isActive: true
+            },
+            {
+                userId: sellers[1]._id,
+                businessName: 'Premium Ramesh (High-ball Wheat)',
+                location: {
+                    state: 'Delhi',
+                    district: 'North Delhi',
+                    mandiName: 'Azadpur Mandi'
+                },
+                trustScore: {
+                    overall: 70,
+                    priceHonesty: 30,
+                    fulfillment: 90,
+                    negotiation: 60
+                },
+                availableCommodities: [
+                    {
+                        itemId: items[0]._id,
+                        name: 'Wheat',
+                        currentStock: 800,
+                        pricePerQuintal: 4500 // ₹45/kg (Unfairly High)
+                    }
+                ],
+                reputationSummary: 'Reliable stock but quotes significantly above market',
+                totalDeals: 40,
+                isActive: true
             }
         ]);
 

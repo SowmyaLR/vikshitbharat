@@ -3,12 +3,17 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import { AIMediatorService } from './services/AIMediatorService';
 import { PriceTruthEngine } from './services/PriceTruthEngine';
 import connectDatabase from './config/database';
 import { Item } from './models/Item';
 import { Vendor } from './models/Vendor';
 import { Conversation } from './models/Conversation';
+import { Deal } from './models/Deal';
+import { User } from './models/User';
 
 dotenv.config();
 
@@ -23,6 +28,7 @@ const io = new Server(httpServer, {
 
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 const PORT = process.env.PORT || 3000;
 
@@ -33,9 +39,30 @@ const priceEngine = new PriceTruthEngine();
 // Connect to Database
 connectDatabase();
 
+// File Upload Configuration
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const uploadDir = path.join(__dirname, '../uploads');
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir);
+        }
+        cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+        cb(null, `${Date.now()}-${file.originalname}`);
+    }
+});
+const upload = multer({ storage });
+
 // API Endpoints
-// API Endpoints
-import { User } from './models/User';
+
+app.post('/api/upload-audio', upload.single('audio'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No audio file provided' });
+    }
+    const audioUrl = `/uploads/${req.file.filename}`;
+    res.json({ audioUrl });
+});
 
 app.get('/api/users', async (req, res) => {
     try {
@@ -56,11 +83,9 @@ app.get('/api/vendors', async (req, res) => {
             .populate('availableCommodities.itemId')
             .exec();
 
-        // Transform to frontend format if needed, or update frontend to match new schema
-        // For now, mapping to ensure compatibility
         const formattedVendors = vendors.map((v: any) => ({
             id: v._id,
-            name: v.businessName, // Ensure consistency with seed data
+            name: v.businessName,
             trustScore: v.trustScore.overall,
             confidenceLevel: v.trustScore.overall > 80 ? "High" : "Medium",
             availableCommodities: v.availableCommodities.map((c: any) => c.name),
@@ -70,7 +95,7 @@ app.get('/api/vendors', async (req, res) => {
                 priceHonesty: v.trustScore.priceHonesty / 100,
                 fulfillment: v.trustScore.fulfillment / 100,
                 negotiation: v.trustScore.negotiation / 100,
-                language: 0.85 // Default for now
+                language: 0.85
             }
         }));
 
@@ -81,221 +106,661 @@ app.get('/api/vendors', async (req, res) => {
     }
 });
 
-app.get('/api/prices', (req, res) => {
+app.get('/api/prices', async (req, res) => {
     const { commodity, location } = req.query;
-    const priceData = priceEngine.getCurrentPrices(commodity as string, location as string);
+    const priceData = await priceEngine.getCurrentPrices(commodity as string, location as string);
     res.json(priceData);
 });
 
-// Socket.io for Real-time Negotiation & Signaling
+app.get('/api/conversations/vendor/:vendorId', async (req, res) => {
+    try {
+        const { vendorId } = req.params;
+        // Search conversation by roomId prefix
+        const conversations = await Conversation.find({ roomId: new RegExp(`^room-${vendorId}-`) })
+            .sort({ lastActivityAt: -1 })
+            .limit(10);
+        res.json(conversations);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch conversations' });
+    }
+});
+
+// Socket.io Logic
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
-    socket.on('join_room', async (roomId) => {
-        socket.join(roomId);
-        console.log(`User ${socket.id} joined room ${roomId}`);
+    socket.on('join_room', async (data) => {
+        const roomId = typeof data === 'string' ? data : data.roomId;
+        const buyerName = typeof data === 'object' ? (data.buyerName || 'Buyer') : 'Buyer';
+        const buyerLocation = typeof data === 'object' ? (data.location || 'Azadpur Mandi') : 'Azadpur Mandi';
+        const commodityRaw = typeof data === 'object' ? (data.commodity || 'Wheat') : 'Wheat';
 
-        // Fetch and emit chat history
+        console.log(`[SOCKET] User ${socket.id} joining room: ${roomId}`);
+        socket.join(roomId);
+        console.log(`🔌 Socket ${socket.id} joined room: ${roomId} as ${buyerName}`);
+
+        let conversation;
         try {
-            const conversation = await Conversation.findOne({ roomId });
+            conversation = await Conversation.findOne({ roomId });
+
+            if (!conversation) {
+                // Pre-initialize conversation with buyer info
+                conversation = new Conversation({
+                    roomId,
+                    commodity: commodityRaw,
+                    location: { mandiName: buyerLocation, state: 'Delhi' },
+                    buyer: { name: buyerName },
+                    status: 'deal_room',
+                    negotiationPhase: 'greeting'
+                });
+                await conversation.save();
+            } else {
+                // Update existing conversation if details are missing
+                if (!conversation.commodity) {
+                    conversation.commodity = commodityRaw;
+                }
+
+                if (typeof data === 'object') {
+                    if (!conversation.buyer?.name || conversation.buyer.name === 'Buyer') {
+                        (conversation as any).buyer = { ...conversation.buyer, name: buyerName };
+                    }
+                    if (data.commodity && conversation.commodity === 'Wheat' && data.commodity !== 'Wheat') {
+                        conversation.commodity = data.commodity;
+                    }
+                }
+                await conversation.save();
+            }
+
+            // TRIGGER GREETING IF IN GREETING PHASE
+            if ((conversation as any).negotiationPhase === 'greeting') {
+                console.log(`🤖 Triggering AI Greeting for room: ${roomId}`);
+                const commodity = conversation.commodity || 'Wheat';
+                const location = conversation.location?.mandiName || buyerLocation;
+                const marketPriceData = await priceEngine.getCurrentPrices(commodity, location);
+
+                // Persist market data
+                conversation.marketData = {
+                    minPrice: marketPriceData.minPrice,
+                    maxPrice: marketPriceData.maxPrice,
+                    modalPrice: marketPriceData.modalPrice,
+                    priceDate: new Date()
+                };
+
+                const greeting = await aiMediator.generateGreeting({
+                    commodity: commodity,
+                    location: location,
+                    marketPrice: {
+                        min: marketPriceData.minPrice,
+                        max: marketPriceData.maxPrice,
+                        modal: marketPriceData.modalPrice
+                    },
+                    language: conversation.buyerLanguage || 'en'
+                });
+
+                // Persist Greeting
+                (conversation as any).aiGreeting = greeting;
+                (conversation as any).negotiationPhase = 'offer';
+                await conversation.save();
+
+                socket.emit('ai_greeting', { text: greeting });
+            }
+
+            // UNIFIED ROOM SYNC (always emit on join/rejoin)
+            console.log(`[ROOM_SYNC] Emitting phase: ${(conversation as any).negotiationPhase} for room: ${roomId}`);
+            socket.emit('room_sync', {
+                phase: (conversation as any).negotiationPhase,
+                aiGreeting: (conversation as any).aiGreeting,
+                aiInsight: (conversation as any).aiInsight,
+                isTooLow: (conversation as any).isOfferTooLow,
+                structuredOffer: (conversation as any).structuredOffer
+            });
+
             if (conversation && conversation.messages.length > 0) {
-                // Map to frontend format
                 const history = conversation.messages.map(msg => ({
                     id: (msg as any)._id || Date.now().toString(),
                     sender: msg.sender,
+                    senderName: msg.senderName,
                     originalText: msg.originalText,
                     translatedText: msg.translatedText,
-                    timestamp: msg.timestamp
+                    timestamp: msg.timestamp,
+                    messageType: (msg as any).messageType || 'text',
+                    audioUrl: (msg as any).audioUrl
                 }));
                 socket.emit('chat_history', history);
             }
         } catch (err) {
-            console.error('Error fetching chat history:', err);
+            console.error('Error handling join_room:', err);
         }
 
-        // Notify seller about new negotiation
-        const vendorId = roomId.replace('room-', '');
-        io.to(`seller-${vendorId}`).emit('new_negotiation_request', {
-            roomId: roomId,
-            buyerName: 'Buyer',
-            item: 'Commodity',
-            location: 'Location',
-            timestamp: new Date()
-        });
+        const rawVendorId = roomId.replace('room-', '');
+        const vendorId = rawVendorId.split('-')[0];
+
+        try {
+            const payload = {
+                roomId,
+                buyerName: buyerName,
+                item: conversation?.commodity || 'Wheat',
+                location: buyerLocation,
+                timestamp: new Date()
+            };
+
+            // Check if vendorId is valid ObjectId
+            if (!vendorId.match(/^[0-9a-fA-F]{24}$/)) {
+                io.to(`seller-${vendorId}`).emit('new_negotiation_request', payload);
+                return;
+            }
+
+            const vendor = await Vendor.findById(vendorId);
+            if (vendor) {
+                // Emit to both UserID (Owner) and VendorID (Public) to ensure delivery
+                const ownerRoom = vendor.userId ? `seller-${vendor.userId.toString()}` : null;
+                const publicRoom = `seller-${vendorId}`;
+
+                console.log(`🔔 Emitting to Owner: ${ownerRoom} AND Public: ${publicRoom} for Room: ${roomId}`);
+
+                const payload = {
+                    roomId,
+                    buyerName: 'Buyer',
+                    item: (conversation as any)?.commodity || 'Wheat', // Use 'conversation' (now in scope)
+                    location: (conversation as any)?.location?.mandiName || 'Unknown',
+                    timestamp: new Date()
+                };
+
+                if (ownerRoom) io.to(ownerRoom).emit('new_negotiation_request', payload);
+                io.to(publicRoom).emit('new_negotiation_request', payload);
+            } else {
+                console.warn(`Could not find vendor or userId for vendorId: ${vendorId}`);
+            }
+        } catch (err) {
+            console.error('Error looking up vendor for notification:', err);
+        }
     });
 
-    // Seller joins their notification room
     socket.on('join_seller_room', (sellerId: string) => {
-        const sellerRoom = `seller-${sellerId}`;
-        socket.join(sellerRoom);
-        console.log(`Seller ${sellerId} joined notification room ${sellerRoom}`);
+        socket.join(`seller-${sellerId}`);
     });
 
-    // WebRTC Signaling
-    socket.on('offer', (data) => {
-        socket.to(data.roomId).emit('offer', data);
+    // Unified Message Handler
+    socket.on('update_preference', async (data) => {
+        try {
+            const update = data.role === 'buyer'
+                ? { buyerLanguage: data.language }
+                : { sellerLanguage: data.language };
+
+            await Conversation.findOneAndUpdate(
+                { roomId: data.roomId },
+                { $set: update },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+            console.log(`🗣️ Updated ${data.role} language to ${data.language} for room ${data.roomId}`);
+        } catch (err) {
+            console.error('Error updating language preference:', err);
+        }
     });
 
-    socket.on('answer', (data) => {
-        socket.to(data.roomId).emit('answer', data);
-    });
+    socket.on('send_message', async (data) => {
+        console.log('📨 Received message:', data);
 
-    socket.on('ice_candidate', (data) => {
-        socket.to(data.roomId).emit('ice_candidate', data);
-    });
-
-    // Voice Message Transcript & Negotiation Logic
-    socket.on('voice_message_transcript', async (data) => {
-        console.log('📨 Received voice_message_transcript:', data);
-
-        // 1. Translate Message
-        const translatedText = await aiMediator.translate(data.text, data.language, 'en');
-
-        // 2. Find or Create Conversation in Database
+        // 1. Fetch Conversation (needed for history-based triggers and translation)
         let conversation = await Conversation.findOne({ roomId: data.roomId });
+        const history = conversation ? conversation.messages : [];
+
+        // 2. Safety Check (AI Moderation) - Now Optimized
+        const safetyCheck = await aiMediator.checkSafety(data.text, history);
+        if (!safetyCheck.isSafe) {
+            console.warn(`🚫 Blocked unsafe message from ${data.sender}: ${data.text}`);
+            socket.emit('moderation_warning', {
+                reason: safetyCheck.reason || "Message blocked due to policy violation."
+            });
+            return;
+        }
 
         if (!conversation) {
-            // New conversation initiated
+            // If conversation doesn't exist, create it with initial preferences
             conversation = new Conversation({
                 roomId: data.roomId,
                 commodity: data.commodity || 'Wheat',
-                location: {
-                    mandiName: data.location || 'Azadpur Mandi',
-                    state: 'Delhi'
-                },
+                location: { mandiName: data.location || 'Azadpur Mandi', state: 'Delhi' },
                 status: 'active',
+                buyerLanguage: data.sender === 'buyer' ? data.language : (data.targetLanguage || 'en'),
+                sellerLanguage: data.sender !== 'buyer' ? data.language : 'en',
                 messages: []
             });
             await conversation.save();
         }
 
-        // 3. Save User Message to Database
+        // Determine Target Language based on Role
+        // If sender is Buyer, target is Seller's language.
+        // If sender is Seller, target is Buyer's language.
+        const targetLang = data.sender === 'buyer'
+            ? (conversation.sellerLanguage || 'en')
+            : (conversation.buyerLanguage || 'en');
+
+        const translatedText = await aiMediator.translate(data.text, data.language, targetLang);
+
+        // 3. Save to DB
         conversation.messages.push({
-            sender: data.sender as any,
-            senderName: data.sender === 'buyer' ? 'Buyer' : (data.vendorName || 'Vendor'),
+            sender: data.sender,
+            senderName: data.senderName || (data.sender === 'buyer' ? 'Buyer' : 'Seller'),
+            // @ts-ignore
+            messageType: data.audioUrl ? 'audio' : 'text',
+            audioUrl: data.audioUrl,
             originalText: data.text,
             translatedText: translatedText,
-            language: data.language,
+            spokenLanguage: data.language,
+            targetLanguage: targetLang,
             timestamp: new Date()
-        });
+        } as any);
         conversation.lastActivityAt = new Date();
+
+        // Update sender's language preference if changed
+        if (data.sender === 'buyer') conversation.buyerLanguage = data.language;
+        if (data.sender === 'seller' || data.sender === 'vendor') conversation.sellerLanguage = data.language;
+
         await conversation.save();
 
-        // 4. Emit Message to Room (Real-time update)
+        // 4. Emit to Room
         io.to(data.roomId).emit('new_message', {
             id: Date.now().toString(),
+            sender: data.sender,
+            senderName: data.senderName,
             originalText: data.text,
             translatedText: translatedText,
-            sender: data.sender,
+            audioUrl: data.audioUrl,
             timestamp: new Date()
         });
 
-        // 5. AI Analysis (Only if buyer sent the message)
-        if (data.sender === 'buyer') {
-            const commodity = data.commodity || 'Wheat';
-            const location = data.location || 'Delhi';
-            const vendorName = data.vendorName || 'Ramesh Kumar';
+        // 5. AI Negotiation (Mediator)
+        // Checks both Buyer and Seller messages
+        const commodity = conversation.commodity || 'Wheat'; // Source of Truth
+        const location = conversation.location?.mandiName || data.location || 'Delhi';
 
-            const marketPriceData = priceEngine.getCurrentPrices(commodity, location);
+        // Fetch real market data
+        const marketPriceData = await priceEngine.getCurrentPrices(commodity, location);
+        console.log(`[DEBUG] Market Price Fetch for ${commodity} in ${location}:`, marketPriceData);
 
-            // Get last few messages for context
-            const history = conversation.messages.slice(-5).map(m => ({
-                sender: m.sender,
-                text: m.translatedText || m.originalText
-            }));
+        const medHistory = conversation.messages.slice(-5).map(m => ({
+            sender: m.sender,
+            message: m.translatedText || m.originalText
+        }));
 
-            const negotiationResult = await aiMediator.analyzeAndNegotiate({
-                buyerMessage: data.text,
-                commodity: commodity,
+        const negotiationResult = await aiMediator.analyzeAndNegotiate({
+            sender: data.sender,
+            message: data.text,
+            translatedMessage: translatedText,
+            commodity: commodity,
+            marketPrice: {
+                min: marketPriceData.minPrice,
+                max: marketPriceData.maxPrice,
+                modal: marketPriceData.modalPrice
+            },
+            history: medHistory,
+            userLanguage: data.sender === 'buyer' ? conversation.buyerLanguage : conversation.sellerLanguage,
+            phase: (conversation as any).negotiationPhase
+        });
+
+        if (negotiationResult.shouldIntervene && negotiationResult.aiMessage) {
+            console.log('🤖 AI Intervening:', negotiationResult.aiMessage);
+
+            conversation.messages.push({
+                sender: 'ai_mediator',
+                senderName: 'AI Mediator',
+                originalText: negotiationResult.aiMessage,
+                translatedText: negotiationResult.aiMessage, // AI speaks English/Common
+                // @ts-ignore
+                messageType: 'text',
+                spokenLanguage: 'en',
+                timestamp: new Date(),
+                metadata: {
+                    suggestedPrice: negotiationResult.suggestedPrice
+                }
+            } as any);
+            await conversation.save();
+
+            // Delay for realism
+            setTimeout(() => {
+                io.to(data.roomId).emit('new_message', {
+                    id: (Date.now() + 1).toString(),
+                    sender: 'ai_mediator',
+                    senderName: 'AI Mediator',
+                    originalText: negotiationResult.aiMessage,
+                    translatedText: negotiationResult.aiMessage,
+                    timestamp: new Date(),
+                    metadata: {
+                        suggestedPrice: negotiationResult.suggestedPrice
+                    }
+                });
+            }, 1000);
+        }
+
+        // 6. Emit Deal Updates if AI found something
+        if (negotiationResult.extractedDeal) {
+            console.log('📜 AI Extracted Deal:', negotiationResult.extractedDeal);
+            io.to(data.roomId).emit('deal_suggested', {
+                deal: negotiationResult.extractedDeal
+            });
+        }
+    });
+
+    // --- DEAL MANAGEMENT ---
+    socket.on('preview_deal', (data) => {
+        // Broadcast the live draft to the other party (Buyer)
+        socket.to(data.roomId).emit('deal_preview', data);
+        console.log(`[Deal] Preview update for room ${data.roomId}`);
+    });
+
+    socket.on('create_deal', async (dealData) => {
+        try {
+            // dealData: { roomId, items, totalAmount, buyerId, sellerId }
+            const newDeal = new Deal(dealData);
+            await newDeal.save();
+            io.to(dealData.roomId).emit('deal_created', newDeal);
+            console.log(`[Deal] Created: ${newDeal._id}`);
+        } catch (err) {
+            console.error("Error creating deal:", err);
+        }
+    });
+
+    socket.on('update_deal_status', async ({ dealId, action, address }) => {
+        try {
+            const deal = await Deal.findById(dealId);
+            if (!deal) return;
+
+            if (action === 'sign_buyer') {
+                deal.buyerSignature = true;
+                if (address) deal.buyerAddress = address;
+            } else if (action === 'sign_seller') {
+                deal.sellerSignature = true;
+            } else if (action === 'reject') {
+                deal.status = 'rejected';
+            } else if (action === 'close') {
+                deal.status = 'closed';
+            } else if (action === 'fail_delivery') {
+                deal.status = 'delivery_failed';
+            }
+
+            // Check for Agreement
+            if (deal.buyerSignature && deal.sellerSignature && deal.status === 'draft') {
+                deal.status = 'agreed';
+                deal.agreedDate = new Date();
+            }
+
+            await deal.save();
+            if (deal.roomId) {
+                io.to(deal.roomId).emit('deal_updated', deal);
+            }
+            console.log(`[Deal] Updated ${dealId}: ${action} -> ${deal.status}`);
+        } catch (err) {
+            console.error("Error updating deal:", err);
+        }
+    });
+    // -----------------------
+    // --- AI-LED DEAL ROOM EVENTS ---
+
+    socket.on('submit_offer', async (data) => {
+        const { roomId, quantity, price, purpose, language } = data;
+        console.log(`[OFFER_SUBMIT] Received from ${socket.id} for Room: ${roomId}`, data);
+
+        let conversation = await Conversation.findOne({ roomId });
+        if (!conversation) {
+            console.error(`[OFFER_SUBMIT] ERROR: No conversation found for room ${roomId}`);
+            return;
+        }
+
+        console.log(`📊 Processing Offer for ${roomId}: ${quantity}kg @ ₹${price}`);
+
+        // 1. Silent Evaluation
+        const commodity = conversation.commodity || 'Wheat';
+        const marketPriceData = await priceEngine.getCurrentPrices(commodity, conversation.location?.mandiName || 'Delhi');
+
+        const evaluation = await aiMediator.evaluateOffer({
+            quantity,
+            price,
+            commodity,
+            marketPrice: {
+                min: marketPriceData.minPrice,
+                max: marketPriceData.maxPrice,
+                modal: marketPriceData.modalPrice
+            },
+            language: language || 'en'
+        });
+
+        // 2. Save Offer to DB
+        (conversation as any).structuredOffer = {
+            quantity,
+            price,
+            purpose,
+            timestamp: new Date()
+        };
+        (conversation as any).negotiationPhase = 'seller_review';
+        (conversation as any).aiInsight = evaluation.insight;
+        (conversation as any).isOfferTooLow = evaluation.isTooLow;
+
+        // Add buyer's offer as a message to chat
+        conversation.messages.push({
+            sender: 'buyer',
+            senderName: 'Buyer',
+            originalText: `📋 Initial Offer: ₹${price}/kg for ${quantity}kg${purpose ? ` (${purpose})` : ''}`,
+            translatedText: `📋 Initial Offer: ₹${price}/kg for ${quantity}kg${purpose ? ` (${purpose})` : ''}`,
+            // @ts-ignore
+            messageType: 'text',
+            spokenLanguage: 'en',
+            timestamp: new Date(),
+            metadata: {
+                offerType: 'initial',
+                quantity,
+                price,
+                purpose
+            }
+        } as any);
+
+        // Add AI insight as a message if offer is too low
+        if (evaluation.isTooLow && evaluation.insight) {
+            conversation.messages.push({
+                sender: 'ai_mediator',
+                senderName: 'AI Mediator',
+                originalText: evaluation.insight,
+                translatedText: evaluation.insight,
+                // @ts-ignore
+                messageType: 'text',
+                spokenLanguage: 'en',
+                timestamp: new Date()
+            } as any);
+        }
+
+        await conversation.save();
+
+        // 3. Emit Insight to Buyer if Too Low
+        if (evaluation.isTooLow && evaluation.insight) {
+            io.to(roomId).emit('ai_insight', { insight: evaluation.insight });
+        }
+
+        // 4. Notify All participants in room
+        console.log(`[OFFER_SUBMIT] Emitting offer_submitted to room: ${roomId}`);
+        io.to(roomId).emit('offer_submitted', {
+            offer: (conversation as any).structuredOffer,
+            isTooLow: evaluation.isTooLow,
+            phase: 'seller_review'
+        });
+    });
+
+    socket.on('seller_decision', async (data) => {
+        const { roomId, decision, counterPrice } = data;
+        let conversation = await Conversation.findOne({ roomId });
+        if (!conversation) return;
+
+        console.log(`⚖️ Seller Decision for ${roomId}: ${decision} ${counterPrice ? `(Counter: ₹${counterPrice})` : ''}`);
+
+        if (decision === 'accept') {
+            conversation.status = 'active';
+            (conversation as any).negotiationPhase = 'chat';
+
+            // Add acceptance message to chat
+            conversation.messages.push({
+                sender: 'ai_mediator',
+                senderName: 'AI Mediator',
+                originalText: `✅ Seller accepted your offer of ₹${(conversation as any).structuredOffer?.price}/kg for ${(conversation as any).structuredOffer?.quantity}kg.`,
+                translatedText: `✅ Seller accepted your offer of ₹${(conversation as any).structuredOffer?.price}/kg for ${(conversation as any).structuredOffer?.quantity}kg.`,
+                // @ts-ignore
+                messageType: 'text',
+                spokenLanguage: 'en',
+                timestamp: new Date()
+            } as any);
+
+        } else if (decision === 'counter') {
+            (conversation as any).negotiationPhase = 'buyer_counter_review';
+            (conversation as any).counterOffer = { price: counterPrice };
+
+            // Evaluate counter-offer with AI
+            const commodity = conversation.commodity || 'Wheat';
+            const marketPriceData = await priceEngine.getCurrentPrices(commodity, conversation.location?.mandiName || 'Delhi');
+
+            const originalOffer = (conversation as any).structuredOffer;
+            const counterEvaluation = await aiMediator.evaluateOffer({
+                quantity: originalOffer?.quantity || 100,
+                price: counterPrice,
+                commodity,
                 marketPrice: {
                     min: marketPriceData.minPrice,
                     max: marketPriceData.maxPrice,
                     modal: marketPriceData.modalPrice
                 },
-                vendorName: vendorName,
-                negotiationHistory: history
+                language: conversation.buyerLanguage || 'en'
             });
 
-            console.log('🤖 AI Negotiation Result:', negotiationResult);
+            // Add counter-offer message to chat
+            const counterMessage = `🔄 Seller counter-offered: ₹${counterPrice}/kg (Original: ₹${originalOffer?.price}/kg)`;
+            conversation.messages.push({
+                sender: 'vendor',
+                senderName: 'Seller',
+                originalText: counterMessage,
+                translatedText: counterMessage,
+                // @ts-ignore
+                messageType: 'text',
+                spokenLanguage: 'en',
+                timestamp: new Date(),
+                metadata: {
+                    counterPrice,
+                    originalPrice: originalOffer?.price
+                }
+            } as any);
 
-            // 6. Save AI Response to Database
-            if (negotiationResult.aiResponse) {
+            // Add AI insight about counter-offer
+            if (counterEvaluation.insight) {
                 conversation.messages.push({
                     sender: 'ai_mediator',
                     senderName: 'AI Mediator',
-                    originalText: negotiationResult.aiResponse,
-                    translatedText: negotiationResult.aiResponse,
-                    language: 'en',
-                    metadata: {
-                        suggestedPrice: negotiationResult.suggestedPrice,
-                        dealStatus: negotiationResult.dealStatus as any,
-                        aiAnalysis: JSON.stringify(negotiationResult)
-                    }
-                });
-                conversation.lastActivityAt = new Date();
-                await conversation.save();
+                    originalText: counterEvaluation.insight,
+                    translatedText: counterEvaluation.insight,
+                    // @ts-ignore
+                    messageType: 'text',
+                    spokenLanguage: 'en',
+                    timestamp: new Date()
+                } as any);
             }
 
-            // 7. Emit AI Response (Delayed for realism)
-            setTimeout(() => {
-                io.to(data.roomId).emit('new_message', {
-                    id: (Date.now() + 1).toString(),
-                    originalText: negotiationResult.aiResponse,
-                    translatedText: negotiationResult.aiResponse,
-                    sender: 'ai_mediator',
-                    timestamp: new Date(),
-                    metadata: {
-                        suggestedPrice: negotiationResult.suggestedPrice,
-                        dealStatus: negotiationResult.dealStatus
-                    }
-                });
+        } else if (decision === 'reject') {
+            conversation.status = 'cancelled';
 
-                // Check if deal conditions are met
-                if (negotiationResult.dealStatus === 'deal_reached') {
-                    // Update conversation status
-                    conversation.status = 'active'; // Or 'pending_confirmation'
-                    conversation.save();
-
-                    setTimeout(() => {
-                        io.to(data.roomId).emit('deal_update', {
-                            status: 'potential_deal',
-                            price: negotiationResult.suggestedPrice,
-                            message: `💡 AI suggests this is a fair deal at ₹${negotiationResult.suggestedPrice}/quintal. Waiting for seller confirmation...`
-                        });
-                    }, 1000);
-                }
-            }, 1000);
+            // Add rejection message
+            conversation.messages.push({
+                sender: 'ai_mediator',
+                senderName: 'AI Mediator',
+                originalText: `❌ Seller rejected the offer of ₹${(conversation as any).structuredOffer?.price}/kg.`,
+                translatedText: `❌ Seller rejected the offer of ₹${(conversation as any).structuredOffer?.price}/kg.`,
+                // @ts-ignore
+                messageType: 'text',
+                spokenLanguage: 'en',
+                timestamp: new Date()
+            } as any);
         }
-    });
 
-    // Seller accepts negotiation
-    socket.on('accept_negotiation', (data) => {
-        console.log('✅ Seller accepted negotiation:', data);
-        io.to(data.roomId).emit('seller_joined', {
-            sellerName: data.sellerName,
-            message: `${data.sellerName} has joined the negotiation`
+        await conversation.save();
+
+        // Emit decision update
+        io.to(roomId).emit('decision_update', {
+            decision,
+            counterPrice,
+            phase: (conversation as any).negotiationPhase,
+            status: conversation.status
+        });
+
+        // Emit new messages to chat
+        const recentMessages = conversation.messages.slice(-3);
+        recentMessages.forEach((msg) => {
+            io.to(roomId).emit('new_message', {
+                id: (msg as any)._id || Date.now().toString(),
+                sender: msg.sender,
+                senderName: msg.senderName,
+                originalText: msg.originalText,
+                translatedText: msg.translatedText,
+                timestamp: msg.timestamp,
+                metadata: (msg as any).metadata
+            });
         });
     });
 
-    // Deal acceptance by either party
-    socket.on('accept_deal', async (data) => {
-        console.log('🤝 Deal accepted by:', data.acceptedBy);
+    socket.on('buyer_decision', async (data) => {
+        const { roomId, decision } = data;
+        let conversation = await Conversation.findOne({ roomId });
+        if (!conversation) return;
 
-        // Update conversation status
-        await Conversation.findOneAndUpdate(
-            { roomId: data.roomId },
-            {
-                status: 'completed',
-                completedAt: new Date()
-            }
-        );
+        console.log(`💰 Buyer Decision for ${roomId}: ${decision}`);
 
-        io.to(data.roomId).emit('deal_update', {
-            status: 'deal_confirmed',
-            acceptedBy: data.acceptedBy,
-            message: `${data.acceptedBy === 'buyer' ? 'Buyer' : 'Seller'} has accepted the deal!`
+        if (decision === 'accept') {
+            conversation.status = 'active';
+            (conversation as any).negotiationPhase = 'chat';
+
+            // Add acceptance message
+            conversation.messages.push({
+                sender: 'ai_mediator',
+                senderName: 'AI Mediator',
+                originalText: `✅ Buyer accepted the counter-offer. Deal finalized! Free chat is now open.`,
+                translatedText: `✅ Buyer accepted the counter-offer. Deal finalized! Free chat is now open.`,
+                // @ts-ignore
+                messageType: 'text',
+                spokenLanguage: 'en',
+                timestamp: new Date()
+            } as any);
+        } else if (decision === 'reject') {
+            (conversation as any).negotiationPhase = 'chat';
+
+            // Add rejection message
+            conversation.messages.push({
+                sender: 'ai_mediator',
+                senderName: 'AI Mediator',
+                originalText: `Buyer rejected the counter-offer. Continuing with open negotiation.`,
+                translatedText: `Buyer rejected the counter-offer. Continuing with open negotiation.`,
+                // @ts-ignore
+                messageType: 'text',
+                spokenLanguage: 'en',
+                timestamp: new Date()
+            } as any);
+        }
+
+        await conversation.save();
+
+        // Emit decision update
+        io.to(roomId).emit('decision_update', {
+            decision,
+            phase: (conversation as any).negotiationPhase,
+            status: conversation.status
+        });
+
+        // Emit new messages to chat
+        const recentMessages = conversation.messages.slice(-1);
+        recentMessages.forEach((msg) => {
+            io.to(roomId).emit('new_message', {
+                id: (msg as any)._id || Date.now().toString(),
+                sender: msg.sender,
+                senderName: msg.senderName,
+                originalText: msg.originalText,
+                translatedText: msg.translatedText,
+                timestamp: msg.timestamp
+            });
         });
     });
+    // -----------------------
 
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);

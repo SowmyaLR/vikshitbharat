@@ -21,9 +21,11 @@ const UserSchema = new mongoose.Schema({
         district: String,
         mandiName: String
     },
+
     preferredLanguage: {
         type: String,
-        default: 'hi'
+        enum: ['hi', 'ta', 'en', 'mr', 'kn', 'te'],
+        default: 'en'
     },
     isVerified: {
         type: Boolean,

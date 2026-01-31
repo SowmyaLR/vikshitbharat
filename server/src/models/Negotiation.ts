@@ -1,4 +1,38 @@
-import mongoose from 'mongoose';
+import mongoose, { Document, Schema } from 'mongoose';
+
+export interface INegotiation extends Document {
+    roomId: string;
+    buyer: {
+        id: string;
+        name: string;
+        phone: string;
+    };
+    vendor: {
+        id: string;
+        name: string;
+        phone: string;
+    };
+    commodity: string;
+    location: {
+        mandiName: string;
+        state: string;
+    };
+    marketData: {
+        modalPrice: number;
+        minPrice: number;
+        maxPrice: number;
+        priceDate: Date;
+    };
+    messages: any[];
+    status: string;
+    finalDeal: any;
+    aiInsights: any;
+    startedAt: Date;
+    completedAt: Date;
+    lastActivityAt: Date;
+    addMessage(messageData: any): Promise<INegotiation>;
+    updateDealStatus(status: string, dealData?: any): Promise<INegotiation>;
+}
 
 // Message Schema - Individual messages in a negotiation
 const MessageSchema = new mongoose.Schema({
@@ -135,4 +169,4 @@ NegotiationSchema.methods.updateDealStatus = function (status: string, dealData?
     return this.save();
 };
 
-export const Negotiation = mongoose.model('Negotiation', NegotiationSchema);
+export const Negotiation = mongoose.model<INegotiation>('Negotiation', NegotiationSchema);

@@ -1,87 +1,30 @@
 import mongoose from 'mongoose';
 
 const DealSchema = new mongoose.Schema({
-    conversationId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Conversation',
-        required: true
-    },
-    buyerId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
-    },
-    vendorId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Vendor',
-        required: true
-    },
-    commodity: {
-        type: String,
-        required: true
-    },
-    quantity: {
-        type: Number,
-        required: true
-    },
-    unit: {
-        type: String,
-        default: 'quintal'
-    },
-    agreedPrice: {
-        type: Number,
-        required: true
-    },
+    roomId: String,
+    buyerId: String,
+    sellerId: String,
+    items: [{
+        name: String,
+        quantity: String,
+        price: Number,
+        total: Number
+    }],
     totalAmount: Number,
-    location: {
-        mandiName: String,
-        state: String
-    },
-    marketPriceAtDeal: {
-        modalPrice: Number,
-        minPrice: Number,
-        maxPrice: Number
-    },
-    dealQuality: {
-        type: String,
-        enum: ['excellent', 'fair', 'poor'],
-        default: 'fair'
-    },
-    buyerSavings: Number, // Positive if below market, negative if above
+    // Status Flow: draft -> agreed (both signed) -> closed (delivered) OR delivery_failed OR rejected
     status: {
         type: String,
-        enum: ['pending', 'confirmed', 'completed', 'cancelled'],
-        default: 'pending'
+        enum: ['draft', 'agreed', 'delivery_failed', 'closed', 'rejected'],
+        default: 'draft'
     },
-    buyerConfirmed: {
-        type: Boolean,
-        default: false
-    },
-    vendorConfirmed: {
-        type: Boolean,
-        default: false
-    },
-    createdAt: {
-        type: Date,
-        default: Date.now
-    },
-    completedAt: Date
-}, {
-    timestamps: true
-});
+    buyerAddress: String,
 
-// Indexes
-DealSchema.index({ buyerId: 1, status: 1 });
-DealSchema.index({ vendorId: 1, status: 1 });
-DealSchema.index({ conversationId: 1 });
-DealSchema.index({ createdAt: -1 });
+    // Signatures
+    sellerSignature: { type: Boolean, default: false },
+    buyerSignature: { type: Boolean, default: false },
 
-// Calculate total amount before saving
-DealSchema.pre('save', function (next) {
-    if (this.quantity && this.agreedPrice) {
-        this.totalAmount = this.quantity * this.agreedPrice;
-    }
-    next();
+    agreedDate: Date,
+    createdAt: { type: Date, default: Date.now }
 });
 
 export const Deal = mongoose.model('Deal', DealSchema);
