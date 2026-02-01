@@ -139,14 +139,20 @@ app.get('/api/conversations/history/:userId', async (req, res) => {
         const vendorIds = vendors.map(v => v._id);
 
         const conversations = await Conversation.find({
-            $or: [
-                { 'buyer.id': queryId },
-                { 'vendor.id': queryId }, // Direct match (if buyerId was used)
-                { 'vendor.id': { $in: vendorIds } } // Match by Vendor documents
-            ],
-            $or: [
-                { status: { $in: ['deal_success', 'deal_failed', 'abandoned'] } },
-                { closureReason: { $exists: true } }
+            $and: [
+                {
+                    $or: [
+                        { 'buyer.id': queryId },
+                        { 'vendor.id': queryId }, // Direct match (if buyerId was used)
+                        { 'vendor.id': { $in: vendorIds } } // Match by Vendor documents
+                    ]
+                },
+                {
+                    $or: [
+                        { status: { $in: ['deal_success', 'deal_failed', 'abandoned'] } },
+                        { closureReason: { $exists: true } }
+                    ]
+                }
             ]
         })
             .sort({ closedAt: -1, updatedAt: -1 })

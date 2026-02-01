@@ -260,7 +260,7 @@ const SellerInterface: React.FC = () => {
             const extension = audioBlob.type.includes('mp4') ? 'mp4' : 'webm';
             formData.append('audio', audioBlob, `voice-message.${extension}`);
             try {
-                const response = await fetch('http://localhost:3000/api/upload-audio', {
+                const response = await fetch('/api/upload-audio', {
                     method: 'POST', body: formData
                 });
                 const data = await response.json();
