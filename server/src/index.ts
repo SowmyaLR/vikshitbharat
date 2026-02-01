@@ -128,14 +128,28 @@ app.get('/api/conversations/vendor/:vendorId', async (req, res) => {
 app.get('/api/conversations/history/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
+
+        // Ensure we query using ObjectId if the string is valid, otherwise use the string
+        const queryId = mongoose.Types.ObjectId.isValid(userId)
+            ? new mongoose.Types.ObjectId(userId)
+            : userId;
+
+        // Find associated Vendor records if this user is a seller
+        const vendors = await Vendor.find({ userId: queryId });
+        const vendorIds = vendors.map(v => v._id);
+
         const conversations = await Conversation.find({
             $or: [
-                { 'buyer.id': userId },
-                { 'vendor.id': userId }
+                { 'buyer.id': queryId },
+                { 'vendor.id': queryId }, // Direct match (if buyerId was used)
+                { 'vendor.id': { $in: vendorIds } } // Match by Vendor documents
             ],
-            status: { $in: ['deal_success', 'deal_failed', 'abandoned'] }
+            $or: [
+                { status: { $in: ['deal_success', 'deal_failed', 'abandoned'] } },
+                { closureReason: { $exists: true } }
+            ]
         })
-            .sort({ closedAt: -1 })
+            .sort({ closedAt: -1, updatedAt: -1 })
             .limit(50);
         res.json(conversations);
     } catch (error) {
@@ -171,19 +185,32 @@ io.on('connection', (socket) => {
         socket.join(roomId);
         console.log(`🔌 Socket ${socket.id} joined room: ${roomId} as ${buyerName}`);
 
+        const parts = roomId.split('-');
+        const vId = parts[1];
+        const bId = parts[2];
+
         try {
+            // Build the setOnInsert object dynamicially to include IDs if valid
+            const setOnInsert: any = {
+                roomId,
+                commodity: commodityRaw,
+                location: { mandiName: buyerLocation, state: 'Delhi' },
+                status: 'deal_room',
+                negotiationPhase: 'greeting'
+            };
+
+            if (vId && mongoose.Types.ObjectId.isValid(vId)) {
+                setOnInsert.vendor = { id: vId };
+            }
+            if (bId && mongoose.Types.ObjectId.isValid(bId)) {
+                setOnInsert.buyer = { id: bId, name: buyerName };
+            } else {
+                setOnInsert.buyer = { name: buyerName };
+            }
+
             let conversation = await Conversation.findOneAndUpdate(
                 { roomId },
-                {
-                    $setOnInsert: {
-                        roomId,
-                        commodity: commodityRaw,
-                        location: { mandiName: buyerLocation, state: 'Delhi' },
-                        buyer: { name: buyerName },
-                        status: 'deal_room',
-                        negotiationPhase: 'greeting'
-                    }
-                },
+                { $setOnInsert: setOnInsert },
                 { upsert: true, new: true, setDefaultsOnInsert: true }
             );
 
@@ -194,6 +221,19 @@ io.on('connection', (socket) => {
             }
 
             if (typeof data === 'object') {
+                if (vId && mongoose.Types.ObjectId.isValid(vId)) {
+                    if (!conversation.vendor?.id) {
+                        (conversation as any).vendor = { ...conversation.vendor, id: vId };
+                        needsUpdate = true;
+                    }
+                }
+                if (bId && mongoose.Types.ObjectId.isValid(bId)) {
+                    if (!conversation.buyer?.id) {
+                        (conversation as any).buyer = { ...conversation.buyer, id: bId };
+                        needsUpdate = true;
+                    }
+                }
+
                 if (!conversation.buyer?.name || conversation.buyer.name === 'Buyer') {
                     (conversation as any).buyer = { ...conversation.buyer, name: buyerName };
                     needsUpdate = true;
@@ -608,9 +648,10 @@ io.on('connection', (socket) => {
                 await conversation.save();
 
                 io.to(dealData.roomId).emit('conversation_closed', {
+                    conversationId: conversation._id.toString(),
                     reason: 'deal_success',
                     message: '✅ Deal finalized! This conversation is now closed.',
-                    dealId: newDeal._id
+                    dealId: newDeal._id.toString()
                 });
             }
 
@@ -919,6 +960,7 @@ io.on('connection', (socket) => {
             } as any);
 
             io.to(roomId).emit('conversation_closed', {
+                conversationId: conversation._id.toString(),
                 reason: 'deal_failed',
                 message: '❌ Seller declined the offer. Conversation closed.'
             });
@@ -987,6 +1029,7 @@ io.on('connection', (socket) => {
         await conversation.save();
 
         io.to(roomId).emit('conversation_closed', {
+            conversationId: conversation._id.toString(),
             reason: 'mutually_ended',
             message: '🤝 Negotiation ended manually.'
         });

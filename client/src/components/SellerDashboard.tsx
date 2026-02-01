@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { Bell, MessageSquare, Clock, CheckCircle, XCircle, LogOut } from 'lucide-react';
 
-const SOCKET_URL = 'http://localhost:3000';
+const SOCKET_URL = ''; // Use proxy
 
 interface Notification {
     id: string;
@@ -27,7 +27,7 @@ const SellerDashboard: React.FC = () => {
     const fetchActive = () => {
         const userId = localStorage.getItem('userId');
         if (!userId) return;
-        fetch(`${SOCKET_URL}/api/conversations/vendor/${userId}`)
+        fetch(`/api/conversations/vendor/${userId}`)
             .then(res => res.json())
             .then(data => {
                 const existing = data.map((conv: any) => ({
@@ -47,7 +47,7 @@ const SellerDashboard: React.FC = () => {
     const fetchHistory = () => {
         const userId = localStorage.getItem('userId');
         if (!userId) return;
-        fetch(`${SOCKET_URL}/api/conversations/history/${userId}`)
+        fetch(`/api/conversations/history/${userId}`)
             .then(res => res.json())
             .then(data => {
                 const results = data.map((conv: any) => ({
@@ -125,7 +125,7 @@ const SellerDashboard: React.FC = () => {
         setNotifications(prev =>
             prev.map(n => n.id === notification.id ? { ...n, status: 'active' } : n)
         );
-        navigate(`/seller/${notification.roomId}?item=${notification.item}&location=${notification.location}`);
+        navigate(`/ seller / ${notification.roomId} ? item = ${notification.item}& location=${notification.location} `);
     };
 
     const handleRejectNegotiation = (notificationId: string) => {
@@ -178,10 +178,10 @@ const SellerDashboard: React.FC = () => {
                             <MessageSquare size={28} className="text-orange-600" /> Negotiations
                         </h2>
                         <div className="flex bg-gray-100 p-1 rounded-xl">
-                            <button onClick={() => setActiveTab('active')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'active' ? 'bg-white shadow-sm text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                            <button onClick={() => setActiveTab('active')} className={`px - 6 py - 2 rounded - lg text - sm font - bold transition - all ${activeTab === 'active' ? 'bg-white shadow-sm text-orange-600' : 'text-gray-500 hover:text-gray-700'} `}>
                                 Active
                             </button>
-                            <button onClick={() => setActiveTab('history')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'history' ? 'bg-white shadow-sm text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                            <button onClick={() => setActiveTab('history')} className={`px - 6 py - 2 rounded - lg text - sm font - bold transition - all ${activeTab === 'history' ? 'bg-white shadow-sm text-orange-600' : 'text-gray-500 hover:text-gray-700'} `}>
                                 History (Audit)
                             </button>
                         </div>
@@ -202,7 +202,7 @@ const SellerDashboard: React.FC = () => {
                                             <div className="flex-1">
                                                 <div className="flex items-center gap-3 mb-2">
                                                     <h3 className="text-xl font-bold text-gray-800">{notification.buyerName}</h3>
-                                                    <span className={`px-3 py-1 rounded-full text-xs font-semibold border-2 ${getStatusColor(notification.status)}`}>
+                                                    <span className={`px - 3 py - 1 rounded - full text - xs font - semibold border - 2 ${getStatusColor(notification.status)} `}>
                                                         {notification.status.toUpperCase()}
                                                     </span>
                                                 </div>
@@ -226,7 +226,7 @@ const SellerDashboard: React.FC = () => {
                                             </div>
                                         )}
                                         {notification.status === 'active' && (
-                                            <button onClick={() => navigate(`/seller/${notification.roomId}?item=${notification.item}&location=${notification.location}`)} className="w-full bg-orange-600 hover:bg-orange-700 text-white py-3 rounded-xl font-semibold transition-colors">
+                                            <button onClick={() => navigate(`/ seller / ${notification.roomId}?item = ${notification.item}& location=${notification.location} `)} className="w-full bg-orange-600 hover:bg-orange-700 text-white py-3 rounded-xl font-semibold transition-colors">
                                                 Continue Negotiation →
                                             </button>
                                         )}
@@ -244,13 +244,14 @@ const SellerDashboard: React.FC = () => {
                         ) : (
                             <div className="space-y-4">
                                 {history.map((item) => (
-                                    <div key={item.id} className="border-2 border-gray-100 rounded-xl p-6 bg-gray-50/50 hover:bg-gray-50 transition-all cursor-pointer" onClick={() => navigate(`/history/${item.id}`)}>
+                                    <div key={item.id} className="border-2 border-gray-100 rounded-xl p-6 bg-gray-50/50 hover:bg-gray-50 transition-all cursor-pointer" onClick={() => navigate(`/ history / ${item.id} `)}>
                                         <div className="flex justify-between items-center">
                                             <div>
                                                 <div className="flex items-center gap-3 mb-1">
                                                     <h3 className="text-lg font-bold text-gray-800">{item.buyerName}</h3>
-                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${item.status === 'deal_success' ? 'bg-green-50 text-green-700 border-green-200' :
-                                                        item.status === 'deal_failed' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-700 border-gray-200'}`}>
+                                                    <span className={`px - 2 py - 0.5 rounded - full text - [10px] font - bold border ${item.status === 'deal_success' ? 'bg-green-50 text-green-700 border-green-200' :
+                                                            item.status === 'deal_failed' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-700 border-gray-200'
+                                                        } `}>
                                                         {item.status.replace(/_/g, ' ').toUpperCase()}
                                                     </span>
                                                 </div>

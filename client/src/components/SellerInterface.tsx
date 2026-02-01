@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
-import { Phone, CheckCircle, Mic, MicOff, Send, AlertCircle } from 'lucide-react';
+import { Phone, CheckCircle, Mic, MicOff, Send, AlertCircle, Clock } from 'lucide-react';
 
-const SOCKET_URL = 'http://localhost:3000';
+const SOCKET_URL = ''; // Use proxy
 
 interface Message {
     id: string;
@@ -57,7 +57,7 @@ const SellerInterface: React.FC = () => {
 
     // Closure State
     const [isClosed, setIsClosed] = useState(false);
-    const [closureData, setClosureData] = useState<{ reason: string, message: string, dealId?: string } | null>(null);
+    const [closureData, setClosureData] = useState<{ reason: string, message: string, dealId?: string, conversationId?: string } | null>(null);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -607,22 +607,21 @@ const SellerInterface: React.FC = () => {
                             <p className="text-gray-600 mb-6 max-w-md mx-auto">
                                 {closureData?.message || 'This negotiation has ended and the chat is now read-only for audit purposes.'}
                             </p>
-                            <div className="flex gap-3 justify-center">
-                                {closureData?.dealId && (
-                                    <button
-                                        onClick={() => window.location.href = `/deals/${closureData.dealId}`}
-                                        className="bg-orange-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-orange-700 transition-all"
-                                    >
-                                        View Deal Details
-                                    </button>
-                                )}
+                            <div className="flex justify-center">
                                 <button
-                                    onClick={() => window.history.back()}
-                                    className="bg-white text-gray-700 border border-gray-300 px-6 py-2 rounded-lg font-bold hover:bg-gray-50 transition-all"
+                                    onClick={() => closureData?.conversationId && (window.location.href = `/history/${closureData.conversationId}`)}
+                                    className="bg-green-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-green-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 active:scale-95 flex items-center gap-2"
                                 >
-                                    Back to Lobby
+                                    <Clock size={18} />
+                                    View Negotiation Record & Deal
                                 </button>
                             </div>
+                            <button
+                                onClick={() => window.history.back()}
+                                className="bg-white text-gray-700 border border-gray-300 px-6 py-2 rounded-lg font-bold hover:bg-gray-50 transition-all"
+                            >
+                                Back to Lobby
+                            </button>
                         </div>
                     )}
                 </div>

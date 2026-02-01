@@ -27,7 +27,7 @@ const VendorList: React.FC = () => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetch('http://localhost:3000/api/vendors')
+        fetch('/api/vendors')
             .then(res => res.json())
             .then(data => {
                 // Filter vendors by location if specified

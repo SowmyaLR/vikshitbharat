@@ -24,7 +24,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialMode = 'buyer' }) => {
         const fetchUsers = async () => {
             try {
                 // In a real app, you'd separate this endpoint or pass role as param
-                const response = await fetch('http://localhost:3000/api/users');
+                const response = await fetch('/api/users');
                 if (response.ok) {
                     const allUsers = await response.json();
                     setUsers(allUsers);

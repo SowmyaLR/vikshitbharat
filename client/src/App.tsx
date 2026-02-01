@@ -8,6 +8,8 @@ import SellerInterface from './components/SellerInterface';
 import Login from './components/Login';
 import SellerDashboard from './components/SellerDashboard';
 import ConversationHistory from './components/ConversationHistory';
+import HistoryList from './components/HistoryList';
+import { Clock } from 'lucide-react';
 
 // Protected Route Component
 const ProtectedRoute = ({ children, isAuthenticated }: { children: React.ReactNode, isAuthenticated: boolean }) => {
@@ -63,7 +65,11 @@ function App() {
               <Link to="/" className="text-xl font-bold text-green-700 flex items-center gap-2">
                 🌾 DharmaVyāpaara
               </Link>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-6">
+                <Link to="/negotiation-history" className="text-sm font-medium text-gray-700 hover:text-green-700 transition-colors flex items-center gap-1">
+                  <Clock size={16} />
+                  History
+                </Link>
                 <div className="text-sm text-gray-600 hidden md:block">
                   Logged in as: <span className="font-semibold">{localStorage.getItem('userName')}</span>
                   {' '}({userType === 'buyer' ? 'Buyer' : 'Seller'})
@@ -129,10 +135,15 @@ function App() {
                 <ConversationHistory />
               </ProtectedRoute>
             } />
+            <Route path="/negotiation-history" element={
+              <ProtectedRoute isAuthenticated={isAuthenticated}>
+                <HistoryList />
+              </ProtectedRoute>
+            } />
           </Routes>
         </main>
       </div>
-    </Router>
+    </Router >
   );
 }
 

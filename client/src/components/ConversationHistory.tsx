@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Lock, CheckCircle2, XCircle, Clock } from 'lucide-react';
 
-const SOCKET_URL = 'http://localhost:3000';
+const SOCKET_URL = ''; // Use proxy
 
 const ConversationHistory: React.FC = () => {
     const { id } = useParams();
@@ -11,7 +11,7 @@ const ConversationHistory: React.FC = () => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetch(`${SOCKET_URL}/api/conversations/${id}/history`)
+        fetch(`/api/conversations/${id}/history`)
             .then(res => res.json())
             .then(data => {
                 setConversation(data);
@@ -67,32 +67,26 @@ const ConversationHistory: React.FC = () => {
                             Reason: <span className="capitalize">{conversation.closureReason?.replace(/_/g, ' ') || 'Process completed'}</span>
                         </p>
                     </div>
-                    {conversation.status === 'deal_success' && conversation.finalDealId && (
-                        <button
-                            onClick={() => navigate(`/deals/${conversation.finalDealId}`)}
-                            className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-green-700 transition-all text-sm"
-                        >
-                            View Final Deal
-                        </button>
-                    )}
                 </div>
 
                 {/* Offer Summary */}
-                {conversation.structuredOffer && (
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border mb-6">
-                        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">Last Structured Offer</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-                                <span className="text-xs text-gray-400 block mb-1">Quantity</span>
-                                <span className="text-xl font-bold">{conversation.structuredOffer.quantity} kg</span>
-                            </div>
-                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-                                <span className="text-xs text-gray-400 block mb-1">Price</span>
-                                <span className="text-xl font-bold text-blue-600">₹{conversation.structuredOffer.price}/kg</span>
+                {
+                    conversation.structuredOffer && (
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border mb-6">
+                            <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">Last Structured Offer</h3>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                                    <span className="text-xs text-gray-400 block mb-1">Quantity</span>
+                                    <span className="text-xl font-bold">{conversation.structuredOffer.quantity} kg</span>
+                                </div>
+                                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                                    <span className="text-xs text-gray-400 block mb-1">Price</span>
+                                    <span className="text-xl font-bold text-blue-600">₹{conversation.structuredOffer.price}/kg</span>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                )}
+                    )
+                }
 
                 {/* Chat History */}
                 <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
@@ -104,10 +98,10 @@ const ConversationHistory: React.FC = () => {
                         {conversation.messages.map((msg: any, idx: number) => (
                             <div key={idx} className={`flex ${msg.sender === 'buyer' ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-[80%] p-4 rounded-2xl ${msg.sender === 'buyer'
-                                        ? 'bg-green-600 text-white rounded-tr-none'
-                                        : msg.sender === 'ai_mediator'
-                                            ? 'bg-purple-50 text-purple-900 border border-purple-100'
-                                            : 'bg-white text-gray-800 border-2 border-gray-100 rounded-tl-none'
+                                    ? 'bg-green-600 text-white rounded-tr-none'
+                                    : msg.sender === 'ai_mediator'
+                                        ? 'bg-purple-50 text-purple-900 border border-purple-100'
+                                        : 'bg-white text-gray-800 border-2 border-gray-100 rounded-tl-none'
                                     }`}>
                                     <div className="text-[10px] font-bold uppercase opacity-60 mb-1">
                                         {msg.senderName || msg.sender} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -123,8 +117,8 @@ const ConversationHistory: React.FC = () => {
                     <Lock className="w-3 h-3" />
                     <span>This audit trail is preserved for transparency and trust scoring.</span>
                 </div>
-            </main>
-        </div>
+            </main >
+        </div >
     );
 };
 

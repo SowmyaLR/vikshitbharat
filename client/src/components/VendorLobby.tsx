@@ -16,7 +16,7 @@ const VendorLobby: React.FC = () => {
     const [selectedItems, setSelectedItems] = useState<string[]>([]);
 
     React.useEffect(() => {
-        fetch('http://localhost:3000/api/vendors')
+        fetch('/api/vendors')
             .then(res => res.json())
             .then((vendors: Vendor[]) => {
                 const found = vendors.find(v => v.id === vendorId);
