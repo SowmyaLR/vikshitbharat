@@ -4,8 +4,6 @@ A voice-first, multilingual digital marketplace for Indian agricultural markets.
 
 ---
 
-## 🏆 Why This Wins (Impact at a Glance)
-
 1. **Agentic Mediation, Not Just Chat**: Our AI doesn't just translate; it **negotiates**. It detects bad faith, nudges towards market fairness (PriceTruthEngine), and ensures stability.
 2. **Behavioral Trust (Mandi Passport)**: Traditional ratings are subjective and biased. Our system generates objective **PHS, NSS, and LRS scores** based on REAL behavior during a trade.
 3. **The Voice Bridge**: We remove the digital literacy barrier. A farmer can speak in Hindi, a trader can respond in English, and the deal gets done with 100% data integrity.
