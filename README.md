@@ -1,6 +1,30 @@
 # DharmaVyāpaara
 
-A voice-first, multilingual digital marketplace for Indian agricultural markets that enables buyers to browse and select vendors based on comprehensive trust scores, then negotiate multiple items in AI-mediated sessions. The system focuses on real-time voice translation, trust-building communication, and future-oriented relationship advice to create lasting business partnerships between vendors and buyers.
+A voice-first, multilingual digital marketplace for Indian agricultural markets. By using **Agentic AI Mediation**, we solve the trust deficit that costs Indian farmers billions in lost revenue every year.
+
+---
+
+## 🏆 Why This Wins (Impact at a Glance)
+
+1. **Agentic Mediation, Not Just Chat**: Our AI doesn't just translate; it **negotiates**. It detects bad faith, nudges towards market fairness (PriceTruthEngine), and ensures stability.
+2. **Behavioral Trust (Mandi Passport)**: Traditional ratings are subjective and biased. Our system generates objective **PHS, NSS, and LRS scores** based on REAL behavior during a trade.
+3. **The Voice Bridge**: We remove the digital literacy barrier. A farmer can speak in Hindi, a trader can respond in English, and the deal gets done with 100% data integrity.
+
+---
+
+## 📋 Feature Audit (Requirement Status)
+
+| Feature Pillar | Requirement Ref | Status | Technical Highlight |
+| :--- | :--- | :--- | :--- |
+| **Vendor Selection** | Req 1 | ✅ **Completed** | Behavioral-sort marketplace with trust components. |
+| **Multilingual Voice** | Req 4 | ✅ **Completed** | Bidirectional Hindi/English/Tamil translation with audio trail. |
+| **Trust Scoring** | Req 8 | ✅ **Completed** | Multi-component PHS/FRS/NSS/LRS engine. |
+| **AI Mediation** | Req 5 | ✅ **Completed** | State-machine driven LLM interventions and extraction. |
+| **Price Transparency** | Req 3 | ✅ **Completed** | Real-time Mandi price integration (PriceTruthEngine). |
+| **Deal Integrity** | Req 7 | ✅ **Completed** | Automated term extraction and permanent audit trail. |
+| **Localized Intel** | Req 9 | ✅ **Completed** | GPS-aware Mandi detection and regional pricing. |
+
+---
 
 ## Key Features
 
@@ -130,6 +154,12 @@ graph TD
     API --> Market[Marketplace Service]
     API --> Neg[Negotiation Service]
 
+    subgraph "AI & Translation Stack"
+        LT[LibreTranslate Sub-Server]
+        Med[AI Mediation Layer]
+        Ex[Extracted Deal Terms]
+    end
+
     subgraph "Data Layer"
         Postgres[(PostgreSQL\nStructured Data)]
         Mongo[(MongoDB\nChat & AI Logs)]
@@ -139,7 +169,27 @@ graph TD
     Market --> Postgres
     Neg --> Mongo
     Neg -.->|Ref Global IDs| Postgres
+    Neg --> Med
+    Med --> LT
 ```
+
+## Technical Breakdown
+
+### 🤖 Agentic AI Mediation: The State Machine Approach
+Unlike traditional AI chatbots that process every message through expensive LLMs, DharmaVyāpaara implements a **State Machine-driven Mediation Engine**.
+- **Efficiency via Triggers**: A lightweight regex and keyword listener acts as the first line of defense. LLM calls are only triggered when specific states are detected: `Price Mentioned`, `Aggressive Tone`, `Repeated Offer`, or `Deal Signal`.
+- **Minimized Hallucination**: By separating the **Extraction Engine** (which converts chat into structured JSON) from the **Mediation Engine** (which generates the response), we ensure that the AI "congratulations" always match the actual data being recorded in the database.
+- **Context-Aware Nudging**: The AI remains silent during normal conversation, only intervening when a party deviates significantly from the **PriceTruthEngine** modal prices.
+
+### 🌐 Multi-Layered Multilingual Execution
+To maintain performance and reliability at scale, we have decoupled the linguistic responsibilities:
+1. **The Translation Layer (LibreTranslate)**: A dedicated sub-service (standardized on Port 5050) that handles raw text-to-text transformation across 9+ Indian languages. This layer has no "knowledge" of the trade; it only ensures semantic fidelity.
+2. **The Mediation Layer (Groq/Llama-3)**: Handles the "logic" of the trade. It operates primarily in English to maintain consistent reasoning, then uses the Translation Layer to localize its interventions.
+- **Logical Separation**: This separation of concerns ensures that a translation failure doesn't crash the negotiation logic, and a logic update doesn't require retraining linguistic models.
+
+### 🎙️ Voice-First Real-Time Sync
+- **Dynamic MIME Detection**: The app automatically detects the browser's audio capabilities (WebM for Chrome, MP4 for Safari) to ensure seamless voice messaging across all devices.
+- **Bidirectional Persistence**: Every message is stored with both its original transcript and its role-specific translation, allowing for a complete **Audit Trail** that can be reviewed in any supported language.
 
 ## Quick Start
 
