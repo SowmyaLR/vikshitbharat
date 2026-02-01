@@ -116,18 +116,18 @@ A voice-first, multilingual digital marketplace for Indian agricultural markets.
 - **Trust Scoring Engine** with behavioral analytics
 
 ### AI & Voice Services
-- **Speech-to-Text** processing for voice input
-- **Text-to-Speech** synthesis for voice output
-- **Real-time Translation** API integration
-- **Emotional Tone Detection** algorithms
-- **Trust Building AI** with intervention logic
+- **Speech-to-Text**: Voice-to-text processing via Web Audio API
+- **Multilingual Translation**: Self-hosted **LibreTranslate** (Port 5050)
+- **Agentic Mediation**: High-performance reasoning via **Groq (Llama-3 8B/70B)**
+- **Emotional Tone Detection** and respectful communication maintenance
+- **Trust Building AI** with nudge-based intervention logic
 
 ### Infrastructure
 - **Docker Compose** for development environment
-- **PostgreSQL 15** database
+- **Vite Proxy Architecture** for seamless service routing
+- **LibreTranslate Sub-Server** (Containerized)
+- **PostgreSQL 15** (Source of Truth) & **MongoDB** (Chat/AI Logs)
 - **Redis 7** cache
-- **AWS S3** for voice message storage
-- **Nginx** (production reverse proxy)
 
 ## Future Architecture (Proposed)
 
@@ -183,13 +183,63 @@ Unlike traditional AI chatbots that process every message through expensive LLMs
 
 ### 🌐 Multi-Layered Multilingual Execution
 To maintain performance and reliability at scale, we have decoupled the linguistic responsibilities:
-1. **The Translation Layer (LibreTranslate)**: A dedicated sub-service (standardized on Port 5050) that handles raw text-to-text transformation across 9+ Indian languages. This layer has no "knowledge" of the trade; it only ensures semantic fidelity.
-2. **The Mediation Layer (Groq/Llama-3)**: Handles the "logic" of the trade. It operates primarily in English to maintain consistent reasoning, then uses the Translation Layer to localize its interventions.
+1.  **The Translation Layer (LibreTranslate)**: A dedicated sub-service (standardized on Port 5050) that handles raw text-to-text transformation across 9+ Indian languages. This layer has no "knowledge" of the trade; it only ensures semantic fidelity.
+2.  **The Mediation Layer (Groq/Llama-3)**: Handles the "logic" of the trade. It operates primarily in English to maintain consistent reasoning, then uses the Translation Layer to localize its interventions.
 - **Logical Separation**: This separation of concerns ensures that a translation failure doesn't crash the negotiation logic, and a logic update doesn't require retraining linguistic models.
 
 ### 🎙️ Voice-First Real-Time Sync
 - **Dynamic MIME Detection**: The app automatically detects the browser's audio capabilities (WebM for Chrome, MP4 for Safari) to ensure seamless voice messaging across all devices.
 - **Bidirectional Persistence**: Every message is stored with both its original transcript and its role-specific translation, allowing for a complete **Audit Trail** that can be reviewed in any supported language.
+
+---
+
+## 🏗️ Visualizing the Agentic Core
+
+### 1. AI Mediation State Machine
+This diagram shows how the system selectively uses LLMs to maintain performance while ensuring negotiation integrity.
+
+```mermaid
+graph TD
+    Msg[Incoming Message/Voice] --> Clean[Text Normalization]
+    Clean --> Trigger{Hit Trigger? \n Price/Tone/Deal/Repeat}
+    
+    Trigger -- NO --> Chat[Direct Socket Broadcast]
+    Trigger -- YES --> LLM[Groq Llama-3 LLM Call]
+    
+    LLM --> Decision{Mediation Action?}
+    Decision -- Nudge --> AI_Msg[AI Suggestion/Intervention]
+    Decision -- Extract --> Deal[Structured Deal Extraction]
+    
+    AI_Msg --> Store[Save to MongoDB]
+    Store --> Emit[Socket io.emit]
+```
+
+### 2. The Multilingual Negotiation Lifecycle
+How a Hindi-speaking Farmer negotiates with an English-speaking Trader in real-time.
+
+```mermaid
+sequenceDiagram
+    participant B as Farmer (Hindi)
+    participant S as Server (Mediator)
+    participant T as AI (Groq + LibreTranslate)
+    participant V as Trader (English)
+
+    B->>S: Audio Message ("Rs 20 mein de do")
+    S->>S: STT / Local Transcript
+    S->>T: Translate (LibreTranslate: HI -> EN)
+    T-->>S: "Give it for Rs 20"
+    
+    S->>T: Analyze (Groq Llama-3: Triggers Hit?)
+    T-->>S: Suggest: "Target price is Rs 22" (Nudge)
+    
+    S->>T: Translate (LibreTranslate: EN -> HI)
+    T-->>S: "लक्ष्य मूल्य ₹22 है"
+    
+    S->>B: Localized Nudge
+    S->>V: English Translation + Nudge
+```
+
+---
 
 ## Quick Start
 
