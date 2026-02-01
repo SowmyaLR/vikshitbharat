@@ -1,5 +1,8 @@
 # DharmaVyāpaara
 
+<img width="1024" height="1024" alt="Gemini_Generated_Image_rycb80rycb80rycb" src="https://github.com/user-attachments/assets/0f27969a-9878-4e17-ac94-8b5c4c1b86dd" />
+
+
 A voice-first, multilingual digital marketplace for Indian agricultural markets. By using **Agentic AI Mediation**, we solve the trust deficit that costs Indian farmers billions in lost revenue every year.
 
 ---
@@ -559,3 +562,18 @@ For support and questions:
 - [ ] Advanced analytics and business intelligence
 - [ ] API marketplace for third-party integrations
 - [ ] International market expansion support
+
+
+## Demo
+
+### 🎥 Watch this Video
+
+[![Watch the video](https://img.youtube.com/vi/jadN8d6iX38/0.jpg)](https://www.youtube.com/watch?v=jadN8d6iX38)
+
+<details>
+<summary>▶️ Click to expand video</summary>
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/jadN8d6iX38" title="YouTube video player" frameborder="0" allowfullscreen></iframe>
+
+</details>
+
