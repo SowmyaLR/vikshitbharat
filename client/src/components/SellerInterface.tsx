@@ -9,6 +9,10 @@ interface Message {
     id: string;
     originalText: string;
     translatedText: string;
+    translations?: {
+        buyer: string;
+        seller: string;
+    };
     sender: 'buyer' | 'vendor' | 'ai_mediator';
     senderName?: string;
     timestamp: Date;
@@ -27,15 +31,15 @@ const SellerInterface: React.FC = () => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [inputText, setInputText] = useState('');
     const [dealStatus, setDealStatus] = useState<string | null>(null);
+    const [myLanguage, setMyLanguage] = useState(
+        searchParams.get('lang') || localStorage.getItem('myLang_seller') || 'en'
+    );
     const [vendorName] = useState('Ramesh Kumar');
 
     // Deal Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [draftItems, setDraftItems] = useState<any[]>([]);
     const [draftTotal, setDraftTotal] = useState(0);
-
-    // Language State
-    const [myLanguage, setMyLanguage] = useState('hi'); // Default Hindi for Seller
 
     // Audio and Warning State
     const [isListening, setIsListening] = useState(false);
@@ -73,10 +77,8 @@ const SellerInterface: React.FC = () => {
             const sellerId = roomId?.replace('room-', '').split('-')[0];
             console.log(`📡 [SELLER] Joining seller room: seller-${sellerId} and negotiation room: ${roomId}`);
             newSocket.emit('join_seller_room', sellerId);
-            newSocket.emit('join_room', { roomId });
-            // Emit initial preference
-            newSocket.emit('update_preference', {
-                roomId: roomId,
+            newSocket.emit('join_room', {
+                roomId,
                 role: 'seller',
                 language: myLanguage
             });
@@ -413,17 +415,18 @@ const SellerInterface: React.FC = () => {
                             <select
                                 value={myLanguage}
                                 onChange={(e) => {
-                                    setMyLanguage(e.target.value);
+                                    const newLang = e.target.value;
+                                    setMyLanguage(newLang);
+                                    localStorage.setItem('myLang_seller', newLang);
                                     socket?.emit('update_preference', {
                                         roomId: roomId,
                                         role: 'seller',
-                                        language: e.target.value
+                                        language: newLang
                                     });
                                 }}
                                 className="text-sm border rounded-lg p-2 bg-orange-700 text-white border-orange-500 cursor-pointer"
                             >
                                 <option value="hi">Hindi (हिंदी)</option>
-                                <option value="ta">Tamil (தமிழ்)</option>
                                 <option value="en">English</option>
                             </select>
                         </div>
@@ -456,16 +459,18 @@ const SellerInterface: React.FC = () => {
                                     </div>
                                 )}
 
-                                <div className="text-base leading-relaxed">{msg.originalText}</div>
-                                {msg.translatedText && msg.translatedText !== msg.originalText && (
+                                <div className="text-base leading-relaxed">
+                                    {msg.translations?.seller || msg.originalText}
+                                </div>
+                                {msg.originalText && (msg.translations?.seller || msg.originalText) !== msg.originalText && (
                                     <div className={`mt-2 p-2 rounded text-sm ${msg.sender === 'vendor' ? 'bg-orange-700/50 text-orange-50' :
                                         msg.sender === 'ai_mediator' ? 'bg-blue-700/50 text-blue-50' :
                                             'bg-gray-50 text-gray-600 border border-gray-100'
                                         }`}>
                                         <div className="flex items-center gap-1 opacity-75 text-[10px] uppercase tracking-wider mb-1">
-                                            <span>Translation</span>
+                                            <span>Original</span>
                                         </div>
-                                        {msg.translatedText}
+                                        {msg.originalText}
                                     </div>
                                 )}
                             </div>

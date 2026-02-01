@@ -11,6 +11,10 @@ interface Message {
     senderName?: string;
     originalText: string;
     translatedText: string;
+    translations?: {
+        buyer: string;
+        seller: string;
+    };
     timestamp: string;
     messageType?: 'text' | 'audio';
     audioUrl?: string;
@@ -49,8 +53,10 @@ const NegotiationRoom: React.FC = () => {
     const [inputText, setInputText] = useState('');
     const [warning, setWarning] = useState<string | null>(null);
 
-    // Language State
-    const [myLanguage, setMyLanguage] = useState('hi');
+    // Language State - default to English or URL param
+    const [myLanguage, setMyLanguage] = useState(
+        searchParams.get('lang') || localStorage.getItem('myLang_buyer') || 'en'
+    );
 
     // Deal State
     const [currentDeal, setCurrentDeal] = useState<any | null>(null);
@@ -112,11 +118,7 @@ const NegotiationRoom: React.FC = () => {
                 roomId: roomId,
                 buyerName: localStorage.getItem('userName') || 'Buyer',
                 location: location || 'Delhi',
-                commodity: item || 'Wheat'
-            });
-            // Emit initial preference
-            newSocket.emit('update_preference', {
-                roomId: roomId,
+                commodity: item || 'Wheat',
                 role: 'buyer',
                 language: myLanguage
             });
@@ -484,17 +486,18 @@ const NegotiationRoom: React.FC = () => {
                         <select
                             value={myLanguage}
                             onChange={(e) => {
-                                setMyLanguage(e.target.value);
+                                const newLang = e.target.value;
+                                setMyLanguage(newLang);
+                                localStorage.setItem('myLang_buyer', newLang);
                                 socket?.emit('update_preference', {
                                     roomId: roomId,
                                     role: 'buyer',
-                                    language: e.target.value
+                                    language: newLang
                                 });
                             }}
                             className="text-sm border rounded-lg p-2 bg-gray-50"
                         >
                             <option value="hi">Hindi (हिंदी)</option>
-                            <option value="ta">Tamil (தமிழ்)</option>
                             <option value="en">English</option>
                         </select>
                     </div>
@@ -530,12 +533,14 @@ const NegotiationRoom: React.FC = () => {
                                     </div>
                                 )}
 
-                                <div className="text-lg">{msg.originalText}</div>
+                                <div className="text-lg">
+                                    {msg.translations?.buyer || msg.originalText}
+                                </div>
 
-                                {msg.translatedText && msg.translatedText !== msg.originalText && (
+                                {msg.originalText && (msg.translations?.buyer || msg.originalText) !== msg.originalText && (
                                     <div className={`mt-2 p-2 rounded text-sm ${msg.sender === 'buyer' ? 'bg-green-700/50 text-green-50' : 'bg-gray-100 text-gray-700'}`}>
-                                        <span className="opacity-75 text-xs uppercase tracking-wider block mb-1">Translation</span>
-                                        {msg.translatedText}
+                                        <span className="opacity-75 text-xs uppercase tracking-wider block mb-1">Original</span>
+                                        {msg.originalText}
                                     </div>
                                 )}
                             </div>

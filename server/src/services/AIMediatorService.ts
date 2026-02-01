@@ -5,6 +5,7 @@ export class AIMediatorService {
     async translateWithLibre(text: string, from: string, to: string): Promise<string> {
         const url = process.env.LIBRETRANSLATE_URL || 'http://localhost:5000/translate';
         try {
+            console.log(`[LibreTranslate] Request: text="${text.substring(0, 50)}", from="${from}", to="${to}"`);
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -17,7 +18,7 @@ export class AIMediatorService {
             });
 
             if (!response.ok) {
-                console.warn(`[LibreTranslate] HTTP Error: ${response.status}`);
+                console.warn(`[LibreTranslate] HTTP Error: ${response.status} for request to ${to} from ${from}`);
                 return text;
             }
 
@@ -72,7 +73,7 @@ export class AIMediatorService {
 
     async translate(text: string, sourceLang: string, targetLang: string): Promise<string> {
         try {
-            if (sourceLang === targetLang) return text;
+            if (!text || sourceLang === targetLang) return text;
 
             // Scripted Heuristics
             const lowerText = text.toLowerCase();
@@ -87,18 +88,14 @@ export class AIMediatorService {
                 if (targetLang === 'en') return "Ok, confirmed";
             }
 
+            // Primary: LibreTranslate
             if (process.env.USE_LIBRE === 'true') {
                 return await this.translateWithLibre(text, sourceLang, targetLang);
             }
 
-            if (process.env.AI_PROVIDER === 'groq' && process.env.GROQ_API_KEY) {
-                const prompt = `Translate this text from ${sourceLang} to ${targetLang}. Only return the translation.\n\nText: "${text}"`;
-                const translated = await this.callGroq(prompt, false, "You are a professional translator.");
-                if (translated) return translated.replace(/"/g, '').trim();
-            }
-
             return text;
         } catch (error) {
+            console.error('Translation Error:', error);
             return text;
         }
     }

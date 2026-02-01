@@ -49,6 +49,10 @@ const MessageSchema = new mongoose.Schema({
         required: true
     },
     translatedText: String,
+    translations: {
+        buyer: String,
+        seller: String
+    },
 
     // Language Support
     spokenLanguage: {

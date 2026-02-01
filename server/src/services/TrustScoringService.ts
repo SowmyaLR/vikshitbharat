@@ -14,10 +14,13 @@ export class TrustScoringService {
             const modal = conversation.marketData.modalPrice;
             const buyerOffer = conversation.structuredOffer?.price || modal;
 
-            // Calculate how "fair" this counter is relative to market modal
-            // A counter closer to modal is better (higher stability/fairness)
-            const deviation = Math.abs(counterPrice - modal) / modal;
-            const stabilityPoints = Math.max(0, 100 - (deviation * 200)); // 0% deviation = 100pts, 50% deviation = 0pts
+            // NEW ASYMMETRIC LOGIC: Don't penalize counters at or below modal.
+            // A seller countering AT market price is a fair stable anchor.
+            let stabilityPoints = 100;
+            if (counterPrice > modal) {
+                const deviation = (counterPrice - modal) / modal;
+                stabilityPoints = Math.max(0, 100 - (deviation * 200)); // Penalize only upward deviation
+            }
 
             console.log(`📊 [NSS Update] Room: ${roomId}, Vendor: ${vendorId}, Counter: ₹${counterPrice}, Modal: ₹${modal}, Points: ${stabilityPoints.toFixed(2)}`);
             await this.applyIncrementalUpdate(vendorId, 'negotiation', stabilityPoints);
@@ -38,9 +41,14 @@ export class TrustScoringService {
             const finalPrice = conversation.structuredOffer?.price || modal;
 
             // 1. Price Honesty (45%)
-            // Ideal price is modal. Variance allowed +/- 10%
-            const priceDeviation = Math.abs(finalPrice - modal) / modal;
-            const phs = Math.max(0, 100 - (priceDeviation * 300)); // Sharp penalty for extreme deviation
+            // NEW ASYMMETRIC LOGIC: Don't penalize if price is at or below market (with 5% buffer).
+            // Selling below market increases trust (transparency/fairness).
+            let phs = 100;
+            const fairThreshold = modal * 1.05; // 5% buffer
+            if (finalPrice > fairThreshold) {
+                const priceDeviation = (finalPrice - fairThreshold) / modal;
+                phs = Math.max(0, 100 - (priceDeviation * 400)); // Sharp penalty for overcharging
+            }
 
             // 2. Language Reliability (20%)
             // Check for dispute keywords in history

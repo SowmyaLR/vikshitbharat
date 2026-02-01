@@ -162,18 +162,17 @@ io.on('connection', (socket) => {
 
     socket.on('join_room', async (data) => {
         const roomId = typeof data === 'string' ? data : data.roomId;
-        const buyerName = typeof data === 'object' ? (data.buyerName || 'Buyer') : 'Buyer';
-        const buyerLocation = typeof data === 'object' ? (data.location || 'Azadpur Mandi') : 'Azadpur Mandi';
-        const commodityRaw = typeof data === 'object' ? (data.commodity || 'Wheat') : 'Wheat';
+        const payloadData = typeof data === 'object' ? data : {};
+        const buyerName = payloadData.buyerName || 'Buyer';
+        const buyerLocation = payloadData.location || 'Azadpur Mandi';
+        const commodityRaw = payloadData.commodity || 'Wheat';
 
         console.log(`[SOCKET] User ${socket.id} joining room: ${roomId}`);
         socket.join(roomId);
         console.log(`🔌 Socket ${socket.id} joined room: ${roomId} as ${buyerName}`);
 
-        let conversation;
         try {
-            // Use findOneAndUpdate with upsert to prevent race conditions (E11000)
-            conversation = await Conversation.findOneAndUpdate(
+            let conversation = await Conversation.findOneAndUpdate(
                 { roomId },
                 {
                     $setOnInsert: {
@@ -188,7 +187,6 @@ io.on('connection', (socket) => {
                 { upsert: true, new: true, setDefaultsOnInsert: true }
             );
 
-            // Parallel updates: if it's an existing room, verify details
             let needsUpdate = false;
             if (!conversation.commodity) {
                 conversation.commodity = commodityRaw;
@@ -204,9 +202,22 @@ io.on('connection', (socket) => {
                     conversation.commodity = data.commodity;
                     needsUpdate = true;
                 }
+
+                if (data.language && data.role === 'buyer') {
+                    if (conversation.buyerLanguage !== data.language) {
+                        conversation.buyerLanguage = data.language;
+                        needsUpdate = true;
+                    }
+                } else if (data.language && (data.role === 'seller' || data.role === 'vendor')) {
+                    if (conversation.sellerLanguage !== data.language) {
+                        conversation.sellerLanguage = data.language;
+                        needsUpdate = true;
+                    }
+                }
             }
 
             if (needsUpdate) {
+                console.log(`📝 [JOIN_ROOM] Updating details for ${roomId}: BuyerLang=${conversation.buyerLanguage}, SellerLang=${conversation.sellerLanguage}`);
                 await conversation.save();
             }
 
@@ -217,13 +228,15 @@ io.on('connection', (socket) => {
                 const location = conversation.location?.mandiName || buyerLocation;
                 const marketPriceData = await priceEngine.getCurrentPrices(commodity, location);
 
-                // Persist market data
                 conversation.marketData = {
                     minPrice: marketPriceData.minPrice,
                     maxPrice: marketPriceData.maxPrice,
                     modalPrice: marketPriceData.modalPrice,
                     priceDate: new Date()
                 };
+
+                const buyerLang = conversation.buyerLanguage || 'en';
+                const sellerLang = conversation.sellerLanguage || 'en';
 
                 const greeting = await aiMediator.generateGreeting({
                     commodity: commodity,
@@ -233,23 +246,52 @@ io.on('connection', (socket) => {
                         max: marketPriceData.maxPrice,
                         modal: marketPriceData.modalPrice
                     },
-                    language: conversation.buyerLanguage || 'en'
+                    language: 'en' // English base
                 });
 
-                // Persist Greeting
-                (conversation as any).aiGreeting = greeting;
+                const greetingBuyer = await aiMediator.translate(greeting, 'en', buyerLang);
+                const greetingSeller = await aiMediator.translate(greeting, 'en', sellerLang);
+
+                (conversation as any).aiGreeting = greetingBuyer; // Store for buyer specifically
                 (conversation as any).negotiationPhase = 'offer';
+
+                // Also push to chat history so it's persistent and bidirectional
+                conversation.messages.push({
+                    sender: 'ai_mediator',
+                    senderName: 'AI Mediator',
+                    originalText: greeting,
+                    translations: {
+                        buyer: greetingBuyer,
+                        seller: greetingSeller
+                    },
+                    messageType: 'text',
+                    spokenLanguage: 'en',
+                    timestamp: new Date()
+                } as any);
+
                 await conversation.save();
 
-                socket.emit('ai_greeting', { text: greeting });
+                socket.emit('ai_greeting', { text: greetingBuyer });
             }
 
-            // UNIFIED ROOM SYNC (always emit on join/rejoin)
-            console.log(`[ROOM_SYNC] Emitting phase: ${(conversation as any).negotiationPhase} for room: ${roomId}`);
+            // UNIFIED ROOM SYNC
+            const userRole = data.role || 'buyer';
+            const userLang = data.language || (userRole === 'buyer' ? conversation.buyerLanguage : conversation.sellerLanguage) || 'en';
+
+            let syncedGreeting = (conversation as any).aiGreeting;
+            let syncedInsight = (conversation as any).aiInsight;
+
+            if (syncedGreeting) {
+                syncedGreeting = await aiMediator.translate(syncedGreeting, 'en', userLang);
+            }
+            if (syncedInsight) {
+                syncedInsight = await aiMediator.translate(syncedInsight, 'en', userLang);
+            }
+
             socket.emit('room_sync', {
                 phase: (conversation as any).negotiationPhase,
-                aiGreeting: (conversation as any).aiGreeting,
-                aiInsight: (conversation as any).aiInsight,
+                aiGreeting: syncedGreeting,
+                aiInsight: syncedInsight,
                 isTooLow: (conversation as any).isOfferTooLow,
                 structuredOffer: (conversation as any).structuredOffer
             });
@@ -261,20 +303,20 @@ io.on('connection', (socket) => {
                     senderName: msg.senderName,
                     originalText: msg.originalText,
                     translatedText: msg.translatedText,
+                    translations: (msg as any).translations || {
+                        buyer: msg.sender === 'vendor' ? msg.translatedText : msg.originalText,
+                        seller: msg.sender === 'buyer' ? msg.translatedText : msg.originalText
+                    },
                     timestamp: msg.timestamp,
                     messageType: (msg as any).messageType || 'text',
                     audioUrl: (msg as any).audioUrl
                 }));
                 socket.emit('chat_history', history);
             }
-        } catch (err) {
-            console.error('Error handling join_room:', err);
-        }
 
-        const rawVendorId = roomId.replace('room-', '');
-        const vendorId = rawVendorId.split('-')[0];
-
-        try {
+            // Notification logic
+            const rawVendorId = roomId.replace('room-', '');
+            const vendorId = rawVendorId.split('-')[0];
             const payload = {
                 roomId,
                 buyerName: buyerName,
@@ -283,35 +325,19 @@ io.on('connection', (socket) => {
                 timestamp: new Date()
             };
 
-            // Check if vendorId is valid ObjectId
             if (!vendorId.match(/^[0-9a-fA-F]{24}$/)) {
                 io.to(`seller-${vendorId}`).emit('new_negotiation_request', payload);
-                return;
-            }
-
-            const vendor = await Vendor.findById(vendorId);
-            if (vendor) {
-                // Emit to both UserID (Owner) and VendorID (Public) to ensure delivery
-                const ownerRoom = vendor.userId ? `seller-${vendor.userId.toString()}` : null;
-                const publicRoom = `seller-${vendorId}`;
-
-                console.log(`🔔 Emitting to Owner: ${ownerRoom} AND Public: ${publicRoom} for Room: ${roomId}`);
-
-                const payload = {
-                    roomId,
-                    buyerName: 'Buyer',
-                    item: (conversation as any)?.commodity || 'Wheat', // Use 'conversation' (now in scope)
-                    location: (conversation as any)?.location?.mandiName || 'Unknown',
-                    timestamp: new Date()
-                };
-
-                if (ownerRoom) io.to(ownerRoom).emit('new_negotiation_request', payload);
-                io.to(publicRoom).emit('new_negotiation_request', payload);
             } else {
-                console.warn(`Could not find vendor or userId for vendorId: ${vendorId}`);
+                const vendor = await Vendor.findById(vendorId);
+                if (vendor) {
+                    const ownerRoom = vendor.userId ? `seller-${vendor.userId.toString()}` : null;
+                    const publicRoom = `seller-${vendorId}`;
+                    if (ownerRoom) io.to(ownerRoom).emit('new_negotiation_request', payload);
+                    io.to(publicRoom).emit('new_negotiation_request', payload);
+                }
             }
         } catch (err) {
-            console.error('Error looking up vendor for notification:', err);
+            console.error('Error handling join_room:', err);
         }
     });
 
@@ -322,18 +348,58 @@ io.on('connection', (socket) => {
     // Unified Message Handler
     socket.on('update_preference', async (data) => {
         try {
-            const update = data.role === 'buyer'
-                ? { buyerLanguage: data.language }
-                : { sellerLanguage: data.language };
+            const role = data.role === 'buyer' ? 'buyer' : 'seller';
+            const newLang = data.language;
 
-            await Conversation.findOneAndUpdate(
-                { roomId: data.roomId },
-                { $set: update },
-                { upsert: true, new: true, setDefaultsOnInsert: true }
-            );
-            console.log(`🗣️ Updated ${data.role} language to ${data.language} for room ${data.roomId}`);
+            const conversation = await Conversation.findOne({ roomId: data.roomId });
+            if (!conversation) return;
+
+            // Update preference
+            if (role === 'buyer') {
+                conversation.buyerLanguage = newLang;
+            } else {
+                conversation.sellerLanguage = newLang;
+            }
+
+            console.log(`🗣️ Updated ${role} language to ${newLang} for room ${data.roomId}. Starting history re-translation...`);
+
+            // Re-translate history for the updated role
+            for (let i = 0; i < conversation.messages.length; i++) {
+                const msg = conversation.messages[i];
+                if (!msg.translations) msg.translations = { buyer: '', seller: '' };
+
+                // Only translate if not already in that language or if translation is missing
+                const currentTranslation = role === 'buyer' ? msg.translations.buyer : msg.translations.seller;
+
+                if (!currentTranslation || currentTranslation === msg.originalText) {
+                    const translated = await aiMediator.translate(msg.originalText, msg.spokenLanguage || 'en', newLang);
+                    if (role === 'buyer') {
+                        msg.translations.buyer = translated;
+                    } else {
+                        msg.translations.seller = translated;
+                    }
+                }
+            }
+
+            await conversation.save();
+
+            // Emit updated history to the user who changed their preference
+            const updatedHistory = conversation.messages.map(msg => ({
+                id: (msg as any)._id || Date.now().toString(),
+                sender: msg.sender,
+                senderName: msg.senderName,
+                originalText: msg.originalText,
+                translations: (msg as any).translations,
+                timestamp: msg.timestamp,
+                messageType: (msg as any).messageType || 'text',
+                audioUrl: (msg as any).audioUrl
+            }));
+
+            socket.emit('chat_history', updatedHistory);
+            console.log(`✅ History re-translated and sent for ${role} in ${newLang}`);
+
         } catch (err) {
-            console.error('Error updating language preference:', err);
+            console.error('Error updating language preference and re-translating:', err);
         }
     });
 
@@ -383,14 +449,12 @@ io.on('connection', (socket) => {
             await conversation.save();
         }
 
-        // Determine Target Language based on Role
-        // If sender is Buyer, target is Seller's language.
-        // If sender is Seller, target is Buyer's language.
-        const targetLang = data.sender === 'buyer'
-            ? (conversation.sellerLanguage || 'en')
-            : (conversation.buyerLanguage || 'en');
+        // Determine translations for both parties
+        const buyerLang = conversation.buyerLanguage || 'en';
+        const sellerLang = conversation.sellerLanguage || 'en';
 
-        const translatedText = await aiMediator.translate(data.text, data.language, targetLang);
+        const translatedForBuyer = await aiMediator.translate(data.text, data.language, buyerLang);
+        const translatedForSeller = await aiMediator.translate(data.text, data.language, sellerLang);
 
         // 3. Save to DB
         conversation.messages.push({
@@ -400,16 +464,15 @@ io.on('connection', (socket) => {
             messageType: data.audioUrl ? 'audio' : 'text',
             audioUrl: data.audioUrl,
             originalText: data.text,
-            translatedText: translatedText,
+            translatedText: data.sender === 'buyer' ? translatedForSeller : translatedForBuyer, // Legacy support
+            translations: {
+                buyer: translatedForBuyer,
+                seller: translatedForSeller
+            },
             spokenLanguage: data.language,
-            targetLanguage: targetLang,
             timestamp: new Date()
         } as any);
         conversation.lastActivityAt = new Date();
-
-        // Update sender's language preference if changed
-        if (data.sender === 'buyer') conversation.buyerLanguage = data.language;
-        if (data.sender === 'seller' || data.sender === 'vendor') conversation.sellerLanguage = data.language;
 
         await conversation.save();
 
@@ -419,7 +482,11 @@ io.on('connection', (socket) => {
             sender: data.sender,
             senderName: data.senderName,
             originalText: data.text,
-            translatedText: translatedText,
+            translatedText: data.sender === 'buyer' ? translatedForSeller : translatedForBuyer, // Legacy
+            translations: {
+                buyer: translatedForBuyer,
+                seller: translatedForSeller
+            },
             audioUrl: data.audioUrl,
             timestamp: new Date()
         });
@@ -453,7 +520,7 @@ io.on('connection', (socket) => {
         const negotiationResult = await aiMediator.analyzeAndNegotiate({
             sender: data.sender,
             message: data.text,
-            translatedMessage: translatedText,
+            translatedMessage: data.sender === 'buyer' ? translatedForSeller : translatedForBuyer,
             commodity: commodity,
             marketPrice: {
                 min: marketPriceData.minPrice,
@@ -468,11 +535,18 @@ io.on('connection', (socket) => {
         if (negotiationResult.shouldIntervene && negotiationResult.aiMessage) {
             console.log('🤖 AI Intervening:', negotiationResult.aiMessage);
 
+            // Translate AI Message for both roles
+            const aiTranslatedBuyer = await aiMediator.translate(negotiationResult.aiMessage, 'en', buyerLang);
+            const aiTranslatedSeller = await aiMediator.translate(negotiationResult.aiMessage, 'en', sellerLang);
+
             conversation.messages.push({
                 sender: 'ai_mediator',
                 senderName: 'AI Mediator',
                 originalText: negotiationResult.aiMessage,
-                translatedText: negotiationResult.aiMessage, // AI speaks English/Common
+                translations: {
+                    buyer: aiTranslatedBuyer,
+                    seller: aiTranslatedSeller
+                },
                 // @ts-ignore
                 messageType: 'text',
                 spokenLanguage: 'en',
@@ -490,7 +564,10 @@ io.on('connection', (socket) => {
                     sender: 'ai_mediator',
                     senderName: 'AI Mediator',
                     originalText: negotiationResult.aiMessage,
-                    translatedText: negotiationResult.aiMessage,
+                    translations: {
+                        buyer: aiTranslatedBuyer,
+                        seller: aiTranslatedSeller
+                    },
                     timestamp: new Date(),
                     metadata: {
                         suggestedPrice: negotiationResult.suggestedPrice
@@ -624,7 +701,7 @@ io.on('connection', (socket) => {
                 max: marketPriceData.maxPrice,
                 modal: marketPriceData.modalPrice
             },
-            language: language || 'en'
+            language: 'en' // Generate in English first for bidirectional translation
         });
 
         // 2. Save Offer to DB
@@ -638,12 +715,23 @@ io.on('connection', (socket) => {
         (conversation as any).aiInsight = evaluation.insight;
         (conversation as any).isOfferTooLow = evaluation.isTooLow;
 
+        const buyerLang = conversation.buyerLanguage || 'en';
+        const sellerLang = conversation.sellerLanguage || 'en';
+
+        // Translate the initial offer status message
+        const initialOfferText = `📋 Initial Offer: ₹${price}/kg for ${quantity}kg${purpose ? ` (${purpose})` : ''}`;
+        const initialOfferBuyer = await aiMediator.translate(initialOfferText, 'en', buyerLang);
+        const initialOfferSeller = await aiMediator.translate(initialOfferText, 'en', sellerLang);
+
         // Add buyer's offer as a message to chat
         conversation.messages.push({
             sender: 'buyer',
             senderName: 'Buyer',
-            originalText: `📋 Initial Offer: ₹${price}/kg for ${quantity}kg${purpose ? ` (${purpose})` : ''}`,
-            translatedText: `📋 Initial Offer: ₹${price}/kg for ${quantity}kg${purpose ? ` (${purpose})` : ''}`,
+            originalText: initialOfferText,
+            translations: {
+                buyer: initialOfferBuyer,
+                seller: initialOfferSeller
+            },
             // @ts-ignore
             messageType: 'text',
             spokenLanguage: 'en',
@@ -658,11 +746,17 @@ io.on('connection', (socket) => {
 
         // Add AI insight as a message if offer is too low
         if (evaluation.isTooLow && evaluation.insight) {
+            const insightBuyer = await aiMediator.translate(evaluation.insight, 'en', buyerLang);
+            const insightSeller = await aiMediator.translate(evaluation.insight, 'en', sellerLang);
+
             conversation.messages.push({
                 sender: 'ai_mediator',
                 senderName: 'AI Mediator',
                 originalText: evaluation.insight,
-                translatedText: evaluation.insight,
+                translations: {
+                    buyer: insightBuyer,
+                    seller: insightSeller
+                },
                 // @ts-ignore
                 messageType: 'text',
                 spokenLanguage: 'en',
@@ -672,9 +766,14 @@ io.on('connection', (socket) => {
 
         await conversation.save();
 
-        // 3. Emit Insight to Buyer if Too Low
+        // 3. Emit Insight to Participants
         if (evaluation.isTooLow && evaluation.insight) {
-            io.to(roomId).emit('ai_insight', { insight: evaluation.insight });
+            const insightBuyer = await aiMediator.translate(evaluation.insight, 'en', buyerLang);
+            const insightSeller = await aiMediator.translate(evaluation.insight, 'en', sellerLang);
+
+            // Emit role-specific insights (legacy support for simple ai_insight event)
+            socket.emit('ai_insight', { insight: insightBuyer });
+            // The seller-side logic usually displays the ai_insight message from the chat list now.
         }
 
         // 4. Notify All participants in room
@@ -699,11 +798,19 @@ io.on('connection', (socket) => {
 
             // Add acceptance message to chat
             const acceptMsg = `✅ Seller accepted your offer of ₹${(conversation as any).structuredOffer?.price}/kg for ${(conversation as any).structuredOffer?.quantity}kg.`;
+            const buyerLang = conversation.buyerLanguage || 'en';
+            const sellerLang = conversation.sellerLanguage || 'en';
+            const acceptBuyer = await aiMediator.translate(acceptMsg, 'en', buyerLang);
+            const acceptSeller = await aiMediator.translate(acceptMsg, 'en', sellerLang);
+
             conversation.messages.push({
                 sender: 'ai_mediator',
                 senderName: 'AI Mediator',
                 originalText: acceptMsg,
-                translatedText: acceptMsg,
+                translations: {
+                    buyer: acceptBuyer,
+                    seller: acceptSeller
+                },
                 // @ts-ignore
                 messageType: 'text',
                 spokenLanguage: 'en',
@@ -728,16 +835,24 @@ io.on('connection', (socket) => {
                     max: marketPriceData.maxPrice,
                     modal: marketPriceData.modalPrice
                 },
-                language: conversation.buyerLanguage || 'en'
+                language: 'en' // Generate in neutral English first
             });
 
             // Add counter-offer message to chat
             const counterMessage = `🔄 Seller counter-offered: ₹${counterPrice}/kg (Original: ₹${originalOffer?.price}/kg)`;
+            const buyerLang = conversation.buyerLanguage || 'en';
+            const sellerLang = conversation.sellerLanguage || 'en';
+            const counterBuyer = await aiMediator.translate(counterMessage, 'en', buyerLang);
+            const counterSeller = await aiMediator.translate(counterMessage, 'en', sellerLang);
+
             conversation.messages.push({
                 sender: 'vendor',
                 senderName: 'Seller',
                 originalText: counterMessage,
-                translatedText: counterMessage,
+                translations: {
+                    buyer: counterBuyer,
+                    seller: counterSeller
+                },
                 // @ts-ignore
                 messageType: 'text',
                 spokenLanguage: 'en',
@@ -750,11 +865,17 @@ io.on('connection', (socket) => {
 
             // Add AI insight if exists
             if (counterEvaluation.insight) {
+                const insightBuyer = await aiMediator.translate(counterEvaluation.insight, 'en', buyerLang);
+                const insightSeller = await aiMediator.translate(counterEvaluation.insight, 'en', sellerLang);
+
                 conversation.messages.push({
                     sender: 'ai_mediator',
                     senderName: 'AI Mediator',
                     originalText: counterEvaluation.insight,
-                    translatedText: counterEvaluation.insight,
+                    translations: {
+                        buyer: insightBuyer,
+                        seller: insightSeller
+                    },
                     // @ts-ignore
                     messageType: 'text',
                     spokenLanguage: 'en',
@@ -778,11 +899,19 @@ io.on('connection', (socket) => {
 
             // Add rejection message
             const rejectMsg = `❌ Seller rejected the offer of ₹${(conversation as any).structuredOffer?.price}/kg. This negotiation is closed.`;
+            const buyerLang = conversation.buyerLanguage || 'en';
+            const sellerLang = conversation.sellerLanguage || 'en';
+            const rejectBuyer = await aiMediator.translate(rejectMsg, 'en', buyerLang);
+            const rejectSeller = await aiMediator.translate(rejectMsg, 'en', sellerLang);
+
             conversation.messages.push({
                 sender: 'ai_mediator',
                 senderName: 'AI Mediator',
                 originalText: rejectMsg,
-                translatedText: rejectMsg,
+                translations: {
+                    buyer: rejectBuyer,
+                    seller: rejectSeller
+                },
                 // @ts-ignore
                 messageType: 'text',
                 spokenLanguage: 'en',
@@ -808,14 +937,17 @@ io.on('connection', (socket) => {
         // Emit new messages to chat
         const recentMessages = conversation.messages.slice(-3);
         recentMessages.forEach((msg) => {
+            const m = msg as any;
             io.to(roomId).emit('new_message', {
-                id: (msg as any)._id || Date.now().toString(),
-                sender: msg.sender,
-                senderName: msg.senderName,
-                originalText: msg.originalText,
-                translatedText: msg.translatedText,
-                timestamp: msg.timestamp,
-                metadata: (msg as any).metadata
+                id: m._id || Date.now().toString(),
+                sender: m.sender,
+                senderName: m.senderName,
+                originalText: m.originalText,
+                translations: m.translations,
+                timestamp: m.timestamp,
+                messageType: m.messageType || 'text',
+                audioUrl: m.audioUrl,
+                metadata: m.metadata
             });
         });
     });
@@ -833,11 +965,19 @@ io.on('connection', (socket) => {
         (conversation as any).endedBy = userId;
 
         const endMsg = `🤝 This negotiation was ended manually. Conversation is now closed for audit.`;
+        const buyerLang = conversation.buyerLanguage || 'en';
+        const sellerLang = conversation.sellerLanguage || 'en';
+        const endBuyer = await aiMediator.translate(endMsg, 'en', buyerLang);
+        const endSeller = await aiMediator.translate(endMsg, 'en', sellerLang);
+
         conversation.messages.push({
             sender: 'ai_mediator',
             senderName: 'AI Mediator',
             originalText: endMsg,
-            translatedText: endMsg,
+            translations: {
+                buyer: endBuyer,
+                seller: endSeller
+            },
             // @ts-ignore
             messageType: 'text',
             spokenLanguage: 'en',
@@ -856,7 +996,10 @@ io.on('connection', (socket) => {
             sender: 'ai_mediator',
             senderName: 'AI Mediator',
             originalText: endMsg,
-            translatedText: endMsg,
+            translations: {
+                buyer: endBuyer,
+                seller: endSeller
+            },
             timestamp: new Date()
         });
     });
@@ -873,11 +1016,19 @@ io.on('connection', (socket) => {
             (conversation as any).negotiationPhase = 'chat';
 
             const acceptMsg = `✅ Buyer accepted the counter-offer. Deal finalized! Free chat is now open.`;
+            const buyerLang = conversation.buyerLanguage || 'en';
+            const sellerLang = conversation.sellerLanguage || 'en';
+            const acceptBuyer = await aiMediator.translate(acceptMsg, 'en', buyerLang);
+            const acceptSeller = await aiMediator.translate(acceptMsg, 'en', sellerLang);
+
             conversation.messages.push({
                 sender: 'ai_mediator',
                 senderName: 'AI Mediator',
                 originalText: acceptMsg,
-                translatedText: acceptMsg,
+                translations: {
+                    buyer: acceptBuyer,
+                    seller: acceptSeller
+                },
                 // @ts-ignore
                 messageType: 'text',
                 spokenLanguage: 'en',
@@ -888,11 +1039,19 @@ io.on('connection', (socket) => {
             conversation.status = 'active';
 
             const rejectMsg = `🔄 Buyer rejected the counter-offer. Continuing with open negotiation.`;
+            const buyerLang = conversation.buyerLanguage || 'en';
+            const sellerLang = conversation.sellerLanguage || 'en';
+            const rejectBuyer = await aiMediator.translate(rejectMsg, 'en', buyerLang);
+            const rejectSeller = await aiMediator.translate(rejectMsg, 'en', sellerLang);
+
             conversation.messages.push({
                 sender: 'ai_mediator',
                 senderName: 'AI Mediator',
                 originalText: rejectMsg,
-                translatedText: rejectMsg,
+                translations: {
+                    buyer: rejectBuyer,
+                    seller: rejectSeller
+                },
                 // @ts-ignore
                 messageType: 'text',
                 spokenLanguage: 'en',
@@ -916,9 +1075,10 @@ io.on('connection', (socket) => {
                 id: (msg as any)._id || Date.now().toString(),
                 sender: msg.sender,
                 senderName: msg.senderName,
-                originalText: msg.originalText,
-                translatedText: msg.translatedText,
-                timestamp: msg.timestamp
+                translations: (msg as any).translations,
+                timestamp: msg.timestamp,
+                messageType: (msg as any).messageType || 'text',
+                audioUrl: (msg as any).audioUrl
             });
         });
     });

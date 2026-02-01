@@ -34,6 +34,17 @@ services:
     networks:
       - dharmavyapaara-network
 
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    container_name: ai-mandi-libretranslate
+    restart: always
+    ports:
+      - "5050:5000"
+    environment:
+      - LT_LOAD_ONLY=en,hi
+    networks:
+      - dharmavyapaara-network
+
 volumes:
   mongodb_data:
     driver: local
